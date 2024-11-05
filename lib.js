@@ -594,8 +594,8 @@ export const renderLilypond = (partsInfo, metaInfo, options = {}) => {
         }
         parts += `  \\bookOutputSuffix "${key}"\n`;
         parts += `  \\header {\n`;
-        if (metaInfo.worktitle) {
-            parts += `    title = "${metaInfo.worktitle}"\n`;
+        if (metaInfo.workTitle) {
+            parts += `    title = "${metaInfo.workTitle}"\n`;
         }   
         if (metaInfo.subtitle) {
             parts += `    subtitle = "${metaInfo.subtitle}"\n`;
@@ -620,6 +620,23 @@ export const renderLilypond = (partsInfo, metaInfo, options = {}) => {
     if (options.scorePaperSize) {
         score += ` \\paper {\n   #(set-paper-size "${options.scorePaperSize}")\n }\n`;
     }
+    score += `  \\header {\n`;
+    if (metaInfo.workTitle) {
+        score += `    title = "${metaInfo.workTitle}"\n`;
+    }   
+    if (metaInfo.subtitle) {
+        score += `    subtitle = "${metaInfo.subtitle}"\n`;
+    }
+    if (metaInfo.composer) {
+        score += `    composer = "${metaInfo.composer}"\n`;
+    }
+    if (metaInfo.lyricist) {
+        score += `    lyricist = "${metaInfo.lyricist}"\n`;
+    }
+    if (metaInfo.arranger) {
+        score += `    arranger = "${metaInfo.arranger}"\n`;
+    }
+    score += "  }\n";
     score += "  \\score { <<\n";
     data.scoreData.forEach((part) => {
         score += part;
