@@ -1,0 +1,59 @@
+#!/usr/bin/env node
+import { program } from 'commander';
+import fs from 'fs';
+import { mscx2ly } from '../index.js';
+import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import path from 'path';    
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+const { version } = JSON.parse(
+    fs.readFileSync(
+        path.join(__dirname, '..', 'package.json'), 
+        'utf-8'
+    )
+);
+
+program
+    .version(version)
+    .option('-m, --separate-music', 'Save music definitions separately, requires output-file')
+    .option('-s, --separate-score', 'Save score definitions separately, requires output-file')
+    .option('-p, --separate-parts', 'Save score definitions separately, requires output-file')
+    .option('--music-file <file>', 'Save music definitions to a separate file')
+    .option('--score-file <file>', 'Save score definitions to a separate file')
+    .option('--parts-file <file>', 'Save parts definitions to a separate file')
+    .arguments('<source-file> [output-file]')
+    .action((sourceFile, outputFile, options) => {
+        if (!sourceFile) {
+            console.error('source-file is required');
+            program.help();
+        }
+        if (!fs.existsSync(sourceFile)) {
+            console.error(`source-file ${sourceFile} does not exist`);
+            program.help();
+        }
+        // 
+        // rules:
+        // source-file is required
+        // output-file is only optional if all of the musicFile, scoreFile, and partsFile are specified
+        if (!outputFile && !(options.separateMusic && options.separateScore && options.separateParts)) {
+            console.error('output-file is required');
+            program.help();
+        }
+        // generate the filenames
+        let musicFile = options.musicFile? options.musicFile : `${outputFile}_music.ly`;
+        let scoreFile = options.scoreFile? options.scoreFile : `${outputFile}_score.ly`;
+        let partsFile = options.partsFile? options.partsFile : `${outputFile}_parts.ly`;
+        mscx2ly({
+            sourceFile,
+            outputFile,
+            musicFile,
+            scoreFile,
+            partsFile,
+            separateMusic: options.separateMusic,
+            separateScore: options.separateScore,
+            separateParts: options.separateParts
+        });
+    });
+program.parse(process.argv);
