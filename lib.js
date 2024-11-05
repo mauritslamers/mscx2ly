@@ -521,7 +521,7 @@ const renderPart = (part, data) => {
 }
 
 
-export const renderLilypond = (partsInfo, metaInfo) => {
+export const renderLilypond = (partsInfo, metaInfo, options = {}) => {
     // there are two parts we are going to render
     // the parts music library, the score and possibly the parts (which can be part of the same file)
     const data = {
@@ -572,6 +572,9 @@ export const renderLilypond = (partsInfo, metaInfo) => {
     let parts = "";
     Object.keys(data.partData).forEach((key) => {
         parts += "\\book {\n";
+        if (options.partsPaperSize) {
+            parts += ` \\paper {\n   #(set-paper-size "${options.partsPaperSize}")\n }\n`;
+        }
         parts += `  \\bookOutputSuffix "${key}"\n`;
         parts += `  \\header {\n`;
         if (metaInfo.worktitle) {
@@ -596,11 +599,16 @@ export const renderLilypond = (partsInfo, metaInfo) => {
         parts += "}\n";
     });
 
-    let score = "\\score { <<\n";
+    let score = "\\book {\n";
+    if (options.scorePaperSize) {
+        score += ` \\paper {\n   #(set-paper-size "${options.scorePaperSize}")\n }\n`;
+    }
+    score += "  \\score { <<\n";
     data.scoreData.forEach((part) => {
         score += part;
     });
-    score += ">>}\n";
+    score += "  >>}\n";
+    score += "}\n";
 
     return {
         music,
@@ -614,7 +622,7 @@ export const renderLilypond = (partsInfo, metaInfo) => {
  * @param {MSCData} MSCData MuseScore XML data converted to JS
  * @returns 
  */
-export const convertMSCX2LY = (MSCData) => {
+export const convertMSCX2LY = (MSCData, options = {}) => {
     // step 1: Order
     // this is a list of instruments used, and adds the family attribute to the instruments
     // it also describes the sections of the score by family
@@ -628,6 +636,6 @@ export const convertMSCX2LY = (MSCData) => {
     // with the parts info we have the parts in the order they are in the score
     // now we can start generating the lilypond structure
     // we will go throught the parts, section by section, and generate the lilypond structure and data
-    const lilypondData = renderLilypond(partsInfo, metaInfo);
+    const lilypondData = renderLilypond(partsInfo, metaInfo, options);
     return lilypondData;
 }

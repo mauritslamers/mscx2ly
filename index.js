@@ -11,6 +11,8 @@ export const mscx2ly = async ({
     musicFile,
     scoreFile,
     partsFile,
+    scorePaperSize,
+    partsPaperSize,
 }) => {
     // decide filenames
     if (separateMusic && !musicFile) {
@@ -27,14 +29,14 @@ export const mscx2ly = async ({
     // convert to json
     const parser = new xml2js.Parser();
     const json = await parser.parseStringPromise(source);
-    const result = convertMSCX2LY(json);
+    const result = convertMSCX2LY(json, { scorePaperSize, partsPaperSize });
     // write output
-    let main = "";
+    let main = '\\version "2.24.0"\n\n';
     if (!separateMusic) {
-        main += result.music;
+        main += result.music + "\n";
     }
     if (!separateScore) {
-        main += result.score;
+        main += result.score + "\n";
     }
     if (!separateParts) {
         main += result.parts;
