@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "description": "Tool to render lilypond code from a MuseScore save file",
   "main": "index.js",
-  "bin": "./bin/mscx2ly",
+  "bin": {
+    "mscx2ly": "bin/mscx2ly"
+  },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
