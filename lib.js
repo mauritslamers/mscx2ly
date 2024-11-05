@@ -584,7 +584,7 @@ export const renderLilypond = (partsInfo, metaInfo, options = {}) => {
 
     let music = "";
     Object.keys(data.musicData).forEach((key) => {
-        music += `${key} = { \n ${data.musicData[key].join(' |\n  ')} }\n`;
+        music += `${key} = { \n ${data.musicData[key].join(' |\n  ')} \\bar "|."\n}\n`;
     });
     let parts = "";
     Object.keys(data.partData).forEach((key) => {
