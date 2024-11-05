@@ -194,11 +194,18 @@ export const parseChord = (chord, timeSig, keySig) => {
     const notes = chord.Note.map((note) => {
         return parseNote(note, keySig);
     });
-
+    let ret;
     if (notes.length > 1) {
-        return `<${notes.join(' ')}>${duration}`;
+        ret = `<${notes.join(' ')}>${duration}`;
     }
-    return notes[0] + duration;
+    else ret = notes[0] + duration;
+
+    // this assumes that the value in subtype is of the format `r[sub_length]`
+    // so r8 for a subdivision in 8ths
+    if (chord.TremoloSingleChord) {
+        ret += `:${chord.TremoloSingleChord[0].subtype[0].substr(1)}`; // cut off the r at the beginning
+    }
+    return ret;
 }
 
 /**

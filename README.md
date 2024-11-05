@@ -66,3 +66,4 @@ In the future, I would like to add the following missing features:
 - dynamics
 - texts such as "pizz." and "arco"
 - some types of articulations like tremolo
+- specific instrument specific marks, such as downbow, upbow, open strings
