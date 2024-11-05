@@ -23,6 +23,8 @@ program
     .option('--music-file <file>', 'Save music definitions to a separate file')
     .option('--score-file <file>', 'Save score definitions to a separate file')
     .option('--parts-file <file>', 'Save parts definitions to a separate file')
+    .option('--score-papersize <size>', 'Set the paper size for the score')
+    .option('--parts-papersize <size>', 'Set the paper size for the parts')
     .arguments('<source-file> [output-file]')
     .action((sourceFile, outputFile, options) => {
         if (!sourceFile) {
@@ -53,7 +55,9 @@ program
             partsFile,
             separateMusic: options.separateMusic,
             separateScore: options.separateScore,
-            separateParts: options.separateParts
+            separateParts: options.separateParts,
+            scorePaperSize: options.scorePapersize,
+            partsPaperSize: options.partsPapersize
         });
     });
 program.parse(process.argv);
