@@ -221,8 +221,8 @@ export function renderClef(clef) {
 
 /**
  * 
- * @param {*} part 
- * @param {*} staffInfo 
+ * @param {Part} part 
+ * @param {FlatScoreStaff} staffInfo 
  * @returns 
  */
 
@@ -275,9 +275,9 @@ export const readPartInfo = (part, staffInfo) => {
 
 /**
  * 
- * @param {*} parts 
+ * @param {Part[]} parts 
  * @param {OrderInfo} orderInfo 
- * @param {*} staffInfo 
+ * @param {FlatScoreStaff} staffInfo 
  * @returns 
  */
 export const readPartsInfo = (parts, orderInfo, staffInfo) => {
@@ -456,7 +456,7 @@ export const renderMusicForStaff = (staffContents) => {
             }
             if (voice.TimeSig) {
                 currentTimeSig = voice.TimeSig[0];
-                ret += parseTimeSig(currentTimeSig) + "\n";
+                ret += "  " + parseTimeSig(currentTimeSig) + "\n";
             }
             if (voice.Rest) {
                 voice.Rest.forEach((rest) => {
@@ -486,6 +486,8 @@ const renderStaff = (staff) => {
 
 const renderPart = (part, data) => {
     const partName = part.trackName;
+    const longName = part.instrument[0].longName;
+    const shortName = part.instrument[0].shortName;
     const ret = {
         musicData: {},
         scoreData: [], // in the score, the order does matter
@@ -500,11 +502,16 @@ const renderPart = (part, data) => {
         // we need to abstract the data for the staffs first
         // because we need the names of the macros
         let tmpScoreData = "\\new PianoStaff <<\n";
+        tmpScoreData += `    \\set PianoStaff.instrumentName = "${longName}"\n`;
+        tmpScoreData += `    \\set PianoStaff.shortInstrumentName = "${shortName}"\n`;
         renderedStaffs.forEach((staff, idx) => {
             const partDataName = createValidPartName(`${partName}${idx+1}`);
             ret.musicData[`${partDataName}`] = staff.measures;
             const clefname = renderClef(staff.defaultClef);
-            tmpScoreData += `\\new Staff { ${clefname} \n \\${partDataName} }\n`;
+            tmpScoreData += "\\new Staff {\n";
+            tmpScoreData += `    ${clefname} \n`;
+            tmpScoreData += `    \\${partDataName}\n`; 
+            tmpScoreData += `}\n`;
         });
         tmpScoreData += ">>\n";
         ret.scoreData.push(tmpScoreData);
@@ -513,8 +520,13 @@ const renderPart = (part, data) => {
     else {
         const renderedStaff = renderStaff(part.staffs[0]);
         const partDataName = createValidPartName(partName);
-        ret.musicData[partDataName] = renderedStaff.measures;	
-        ret.scoreData.push(`\\new Staff { \\${partDataName} }\n`);
+        ret.musicData[partDataName] = renderedStaff.measures;
+        let tmpScoreData = "  \\new Staff {\n";
+        tmpScoreData += `    \\set Staff.instrumentName = "${longName}"\n`;
+        tmpScoreData += `    \\set Staff.shortInstrumentName = "${shortName}"\n`;
+        tmpScoreData += `    \\${partDataName}`;
+        tmpScoreData += '}\n';
+        ret.scoreData.push(tmpScoreData);
         ret.partData[partName] = `\\new Staff { \\${partDataName} }\n`;
     }
     return ret;
@@ -536,7 +548,7 @@ export const renderLilypond = (partsInfo, metaInfo, options = {}) => {
                 return renderPart(part, data);
             });
             // we can now copy the musicdata to the data.musicData
-            let ret = "\\new StaffGroup <<\n";
+            let ret = "  \\new StaffGroup <<\n";
             parts.forEach((part) => {
                 Object.keys(part.musicData).forEach((key) => {
                     data.musicData[key] = part.musicData[key];
@@ -548,7 +560,7 @@ export const renderLilypond = (partsInfo, metaInfo, options = {}) => {
                     data.partData[key] = part.partData[key];
                 });
             });
-            ret += ">>\n";
+            ret += "  >>\n";
             data.scoreData.push(ret);
         }
         else {
