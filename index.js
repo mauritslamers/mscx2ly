@@ -23,7 +23,7 @@ export const mscx2ly = async ({
         partsFile = `${outputFile}_parts.ly`;
     }
     // read source file
-    const source = fs.readFileSync(source, 'utf8');
+    const source = fs.readFileSync(sourceFile, 'utf8');
     // convert to json
     const parser = new xml2js.Parser();
     const json = await parser.parseStringPromise(source);
