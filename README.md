@@ -37,9 +37,10 @@ Then call:
 or use the other options.
 
 ## Limitations
-This tool is limited in what it exports from MuseScore. 
-Currently only the parts, staffs and notes/rests are exported, and where
-possible forced accidentals.
+This tool is currently limited in what it exports from MuseScore.
+At the moment only the parts, staffs and notes/rests are exported, and where
+possible forced accidentals. Any other information is ignored. See under Future
+what is intended to be supported in the future.
 
 ## Use case
 I wrote this tool as a way to prevent having to retype all the notes in 
@@ -56,3 +57,12 @@ MusicXML is not a music format, despite the name. MusicXML is a music notation
 format, but one that positions elements. This makes it hard for engraver-like 
 programs like Lilypond to apply their own rules. Any mistakes in the notation 
 will inevitably transfer to other programs.
+
+## Future additions
+In the future, I would like to add the following missing features:
+- repeats
+- special barlines
+- tempo
+- dynamics
+- texts such as "pizz." and "arco"
+- some types of articulations like tremolo
