@@ -207,6 +207,9 @@ export const parseChord = (chord, timeSig, keySig) => {
  * @returns {string} Lilypond code for clef
  */
 export function renderClef(clef) {
+    if (Array.isArray(clef)) {
+        clef = clef[0];
+    }
     switch (clef) {
         case 'G': return '\\clef treble';
         case 'F': return '\\clef bass';
@@ -278,7 +281,7 @@ export const readPartInfo = (part, staffInfo) => {
  * @param {Part[]} parts 
  * @param {OrderInfo} orderInfo 
  * @param {FlatScoreStaff} staffInfo 
- * @returns 
+ * @returns {}
  */
 export const readPartsInfo = (parts, orderInfo, staffInfo) => {
     // this returns an object with the part name as key
@@ -521,11 +524,13 @@ const renderPart = (part, data) => {
         const renderedStaff = renderStaff(part.staffs[0]);
         const partDataName = createValidPartName(partName);
         ret.musicData[partDataName] = renderedStaff.measures;
+        const clefname = renderClef(part.staffs[0].defaultClef);
         let tmpScoreData = "  \\new Staff {\n";
         tmpScoreData += `    \\set Staff.instrumentName = "${longName}"\n`;
         tmpScoreData += `    \\set Staff.shortInstrumentName = "${shortName}"\n`;
-        tmpScoreData += `    \\${partDataName}`;
-        tmpScoreData += '}\n';
+        tmpScoreData += `    ${clefname} \n`;
+        tmpScoreData += `    \\${partDataName}\n`;
+        tmpScoreData += '  }\n';
         ret.scoreData.push(tmpScoreData);
         ret.partData[partName] = `\\new Staff { \\${partDataName} }\n`;
     }
