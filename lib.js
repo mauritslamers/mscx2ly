@@ -487,11 +487,14 @@ export const readStaffInfo = (staffs) => {
         const ret = {
             id: staff.get('id'),
             Measure: staff.get('Measure').map((measure) => {
+                debugger;
                 let voices = measure.get('voice');
                 if (!Array.isArray(voices)) {
                     voices = [voices];
                 }
                 return {
+                    irregular: measure.get('irregular'),
+                    len: measure.get('len'),
                     voice: voices.map((voice) => {
                         // the purpose here is a filter to only get the relevant information
                         // now order becomes important, so we use the children instead.
@@ -521,6 +524,11 @@ export const renderMusicForStaff = (staffContents) => {
     let currentKeySig = null;
     let currentTimeSig = null;
     const ret = staffContents.map((measure) => {
+        let measureText = "";
+        if (measure.len) {
+            // we assume a \partial for now
+            measureText += `\\partial ${durationMap[measure.len]}`;
+        }
         const voices = measure.voice;
         const parsedVoices = voices.map((voice) => {
             return voice.map((evt) => {
@@ -548,9 +556,9 @@ export const renderMusicForStaff = (staffContents) => {
             }).join(' ');
         });
         if (parsedVoices.length > 1) {
-            return `<< { ${parsedVoices.join(' } \\\\ { ')} } >>`;
+            return `${measureText} << { ${parsedVoices.join(' } \\\\ { ')} } >>`;
         }
-        return parsedVoices[0];
+        return `${measureText} ${parsedVoices[0]}`;
     });
     return ret;
 }
