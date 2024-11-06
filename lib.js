@@ -522,7 +522,7 @@ export const renderMusicForStaff = (staffContents) => {
     let currentTimeSig = null;
     const ret = staffContents.map((measure) => {
         const voices = measure.voice;
-        return voices.map((voice) => {
+        const parsedVoices = voices.map((voice) => {
             return voice.map((evt) => {
                 switch (evt.name) {
                     case 'KeySig': {
@@ -546,27 +546,11 @@ export const renderMusicForStaff = (staffContents) => {
                     default: return '';
                 }
             }).join(' ');
-            // let ret = "";
-            // if (voice.KeySig) {
-            //     currentKeySig = voice.KeySig[0];
-            //     ret += renderKeySig(currentKeySig) + "\n";
-            // }
-            // if (voice.TimeSig) {
-            //     currentTimeSig = voice.TimeSig[0];
-            //     ret += "  " + parseTimeSig(currentTimeSig) + "\n";
-            // }
-            // if (voice.Rest) {
-            //     voice.Rest.forEach((rest) => {
-            //         ret += " " + parseRest(rest, currentTimeSig);
-            //     });
-            // }
-            // if (voice.Chord) {
-            //     voice.Chord.forEach((chord) => {
-            //         ret += " " + parseChord(chord, currentTimeSig, currentKeySig);
-            //     });
-            // }
-            // return ret;
         });
+        if (parsedVoices.length > 1) {
+            return `<< { ${parsedVoices.join(' } \\\\ { ')} } >>`;
+        }
+        return parsedVoices[0];
     });
     return ret;
 }
