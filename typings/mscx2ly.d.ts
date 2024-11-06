@@ -617,3 +617,17 @@ interface LilypondData {
     score: string; // the main partiture as a book
 }
 
+class XmlWrapper {
+    get children(): XmlWrapper | XmlWrapper[]; // the children of the current node
+    get attributes(): { [key: string]: string }; // the attributes of the current node  
+    get text(): string; // the text of the current node
+    get name(): string; // the name of the current node
+    get hasAttributes(): boolean; // whether the current node has attributes
+    get hasChildren(): boolean; // whether the current node has children
+    get isText(): boolean; // whether the current node is a text node
+    parent: XmlWrapper; // the parent of the current node
+    data: object; // the data of the current node
+    constructor(data: object, parent: XmlWrapper);
+    get (name: string): XmlWrapper; // get children by name
+    get keys(): { [key:string]: any }; // get the keys of the current node
+}

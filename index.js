@@ -1,6 +1,7 @@
 import { convertMSCX2LY } from './lib.js';
 import fs from 'fs';
 import xml2js from 'xml2js';
+import { XmlWrapper } from './xml_wrapper.js';
 
 export const mscx2ly = async ({
     sourceFile,
@@ -27,9 +28,12 @@ export const mscx2ly = async ({
     // read source file
     const source = fs.readFileSync(sourceFile, 'utf8');
     // convert to json
-    const parser = new xml2js.Parser();
+    const parser = new xml2js.Parser({ preserveChildrenOrder : true, explicitChildren: true});
     const json = await parser.parseStringPromise(source);
-    const result = convertMSCX2LY(json, { scorePaperSize, partsPaperSize });
+    // convert to a format we can interact with
+    const data = new XmlWrapper(json.museScore);
+    debugger;
+    const result = convertMSCX2LY(data, { scorePaperSize, partsPaperSize });
     // write output
     let main = '\\version "2.24.0"\n\n';
     if (!separateMusic) {

@@ -1,11 +1,16 @@
+import { XmlWrapper } from "./xml_wrapper.js";
+
 /** 
  * @param {MetaTag} metaTag 
  * @returns {FlatMetaTag}
  */
 export const parseMetaTag = (metaTag) => {
+    if (!Array.isArray(metaTag)) {
+        metaTag = [metaTag];
+    }
     const ret = {};
     metaTag.forEach((tag) => {
-        ret[tag.$.name] = tag._;
+        ret[tag.get('name')] = tag.text;
     });
     return ret;
 }
@@ -14,11 +19,11 @@ const posKeySigs = ['C', 'G', 'D', 'A', 'E', 'B', 'Fis', 'Cis'];
 const negKeySigs = ['C', 'F', 'Bes', 'Es', 'As', 'Des', 'Ges', 'Ces'];
 /**
  * 
- * @param {KeySig} keySig 
+ * @param {XmlWrapper} keySig 
  * @returns {string} Lilypond note name for key signature in major
  */
 export const parseKeySig = (keySig) => {
-    const concertKey = keySig.concertKey[0];
+    const concertKey = parseInt(keySig.get('concertKey'), 10);
     if (concertKey > 0) {
         return posKeySigs[concertKey];
     }
@@ -27,7 +32,7 @@ export const parseKeySig = (keySig) => {
 
 /**
  * 
- * @param {KeySig} keySig 
+ * @param {XmlWrapper} keySig 
  * @returns {string} Lilypond code for key signature
  */
 export const renderKeySig = (keySig) => {
@@ -36,10 +41,12 @@ export const renderKeySig = (keySig) => {
 
 /**
  * 
- * @param {TimeSig} timeSig 
+ * @param {XmlWrapper} timeSig 
  */
 const parseTimeSig = (timeSig) => {
-    return `\\time ${timeSig.sigN[0]}/${timeSig.sigD[0]}`;
+    const n = timeSig.get('sigN');
+    const d = timeSig.get('sigD');
+    return `\\time ${n}/${d}`;
 }
 
 
@@ -92,13 +99,13 @@ export const parseRest = (rest, timeSig) => {
     // if the durationType === "measure" then we have a whole rest, so we
     // can use `R`.
     // now we need to convert the ratio to a lilypond duration
-    const restDuration = rest.duration? rest.duration[0] : rest.durationType[0];
+    const restDuration = rest.get('duration') ? rest.get('duration') : rest.get('durationType');
 
     const duration = durationMap[restDuration];
     if (!duration) {
         throw new Error(`Unknown duration: ${restDuration}`);
     }
-    if (rest.durationType[0] === "measure") {
+    if (rest.get('durationType') === "measure") {
         return `R${duration}`;
     }
     else {
@@ -150,7 +157,7 @@ const noteNamesForKeySig = {
  */
 const convertMidiPitchToNoteName = (midiPitch, keySig) => {
     // list of note names indexed
-    const concertKey = keySig.concertKey[0];
+    const concertKey = keySig.get('concertKey');
     let keySigType = null;
     if (noteNamesForKeySig[concertKey]) {
         keySigType = concertKey;
@@ -173,8 +180,8 @@ const parseNote = (note, keySig) => {
     // we need to convert the midi pitch (at pitch) to a note name
     // this is not straightforward, because it depends on the key signature (a bit)
     // we do have a possible accidental
-    const base = convertMidiPitchToNoteName(note.pitch[0], keySig);
-    if (note.Accidental) {
+    const base = convertMidiPitchToNoteName(note.get('pitch'), keySig);
+    if (note.get('Accidental')) {
         return base + "!";
     }
     return base;
@@ -186,12 +193,15 @@ const parseNote = (note, keySig) => {
  * @param {TimeSig} timeSig 
  */
 export const parseChord = (chord, timeSig, keySig) => {
-    // console.log('chord:', chord);
-    const dur = durationMap[chord.durationType[0]];
-    const dots = chord.dots? parseInt(chord.dots[0], 10) : 0;
+    const dur = durationMap[chord.get('durationType')];
+    const dots = chord.get('dots')? parseInt(chord.get('dots'), 10) : 0;
     const duration = dur + '.'.repeat(dots);
 
-    const notes = chord.Note.map((note) => {
+    let noteInfo = chord.get('Note');
+    if (!Array.isArray(noteInfo)) {
+        noteInfo = [noteInfo];
+    }
+    const notes = noteInfo.map((note) => {
         return parseNote(note, keySig);
     });
     let ret;
@@ -202,8 +212,9 @@ export const parseChord = (chord, timeSig, keySig) => {
 
     // this assumes that the value in subtype is of the format `r[sub_length]`
     // so r8 for a subdivision in 8ths
-    if (chord.TremoloSingleChord) {
-        ret += `:${chord.TremoloSingleChord[0].subtype[0].substr(1)}`; // cut off the r at the beginning
+    const tremolo = chord.get('TremoloSingleChord');
+    if (tremolo && tremolo.length > 0) {
+        ret += `:${tremolo.get('subtype').substr(1)}`; // cut off the r at the beginning
     }
     return ret;
 }
@@ -238,45 +249,55 @@ export function renderClef(clef) {
 
 export const readPartInfo = (part, staffInfo) => {
     // this returns an object with the information of the part
+    let instruments = part.get('Instrument');
+    if (!Array.isArray(instruments)) {
+        instruments = [instruments];
+    }
     const ret = {};
-    ret.id = part.$.id;
-    ret.trackName = part.trackName[0];
-    ret.instrument = part.Instrument.map((instrument) => {
+    ret.id = part.get('id');
+    ret.trackName = part.get('trackName');
+    ret.instrument = instruments.map((instrument) => {
+        let instrChannel = instrument.get('Channel');
+        if (!Array.isArray(instrChannel)) {
+            instrChannel = [instrChannel];
+        }
         return {
-            id: instrument.$.id,
-            longName: instrument.longName,
-            shortName: instrument.shortName,
-            trackName: instrument.trackName,
-            minPitchP: instrument.minPitchP,
-            maxPitchP: instrument.maxPitchP,
-            minPitchA: instrument.minPitchA,
-            maxPitchA: instrument.maxPitchA,
-            instrumentId: instrument.instrumentId,
-            clef: instrument.clef,
-            Channel: instrument.Channel.map((channel) => {
+            id: instrument.get('id'),
+            longName: instrument.get('longName'),
+            shortName: instrument.get('shortName'),
+            trackName: instrument.get('trackName'),
+            minPitchP: instrument.get('minPitchP'),
+            maxPitchP: instrument.get('maxPitchP'),
+            minPitchA: instrument.get('minPitchA'),
+            maxPitchA: instrument.get('maxPitchA'),
+            instrumentId: instrument.get('instrumentId'),
+            clef: instrument.get('clef'),
+            Channel: instrChannel.map((channel) => {
                 return {
-                    synti: channel.synti,
-                    midiPort: channel.midiPort,
-                    midiChannel: channel.midiChannel,
-                    program: channel.program.map((program) => {
-                        return {
-                            value: program.$.value
-                        }
-                    })
+                    synti: channel.get('synti'),
+                    midiPort: channel.get('midiPort'),
+                    midiChannel: channel.get('midiChannel'),
+                    program: channel.get('program')
                 }
             })
         }
     });
-    ret.staffs = part.Staff.map((staff) => {
+    let staffs = part.get('Staff');
+    if (!Array.isArray(staffs)) {
+        staffs = [staffs];
+    }
+    ret.staffs = staffs.map((staff) => {
         const staffContents = staffInfo.find((staffdata) => {
-            return staffdata.id === staff.$.id;
+            return staffdata.id === staff.get('id');
         });
+        let defaultConcertClef = staff.get('defaultConcertClef')? staff.get('defaultConcertClef') : null;
+        let defaultClef = staff.get('defaultClef')? staff.get('defaultClef') || defaultConcertClef : null;
         return {
-            id: staff.$.id,
-            StaffType: staff.StaffType,
-            isStaffVisible: staff.isStaffVisible,
-            barLineSpan: staff.barLineSpan,
-            defaultClef: staff.defaultClef || staff.defaultConcertClef || ['G'],
+            id: staff.get('id'),
+            StaffType: staff.get('StaffType'),
+            isStaffVisible: staff.get('isStaffVisible'),
+            barLineSpan: staff.get('barLineSpan'),
+            defaultClef,
             contents: staffContents.Measure,
         }
     });
@@ -297,7 +318,9 @@ export const readPartsInfo = (parts, orderInfo, staffInfo) => {
     // sadly the instruments in the orderInfo is not ordered as in the score
     // also, the order is inconclusive based on the info available in the orderInfo
     // there is no direct evidence why the string instruments are below the keyboards
-    
+    if (!Array.isArray(parts)) {
+        parts = [parts];
+    }
     // so we better go by parts, find sections they could belong to, and wrap them that way.
     const partsInfo = parts.map((part) => {
         return readPartInfo(part, staffInfo);
@@ -312,11 +335,12 @@ export const readPartsInfo = (parts, orderInfo, staffInfo) => {
         id: null,
         parts: []
     };
+    debugger;
     partsInfo.forEach((partInfo) => {
         // we trust the order of the instruments in the partInfo
         // take the instrumentId
         // console.log('part:', partInfo.trackName);
-        const instrumentId = partInfo.instrument[0].instrumentId[0];
+        const instrumentId = partInfo.instrument[0].instrumentId;
         // console.log('instrumentId:', instrumentId);
         const section = orderInfo.sections.find((section) => {
             const sharesSectionFamilies = section.family.some((family) => {
@@ -370,30 +394,45 @@ export const readPartsInfo = (parts, orderInfo, staffInfo) => {
  */
 export const readOrderInfo = (order) => {
     // first: instruments
-    const instruments = order.instrument.map((instrument) => {
+    const instruments = order.get('instrument').map((instrument) => {
+        let fam = instrument.get('family', true);
+        if (!Array.isArray(fam)) {
+            fam = [fam];
+        }
         return {
-            id: instrument.$.id,
-            family: instrument.family.map((family) => {
+            id: instrument.get('id'),
+            family: fam.map((family) => {
                 return {
-                    id: family.$.id,
-                    name: family._
+                    id: family.get('id'),
+                    name: family.text
                 }
             })
         }
     });
     // second: sections
-    const sections = order.section.map((section) => {
+    const sections = order.get('section').map((section) => {
+        let unsorted = section.get('unsorted');
+        if (unsorted && !Array.isArray(unsorted)) {
+            unsorted = [unsorted];
+        }
+        else {
+            unsorted = [];
+        }
+        let family = section.get('family');
+        if (!Array.isArray(family)) {
+            family = [family];
+        }
         return {
-            id: section.$.id,
-            brackets: section.$.brackets === 'true',
-            barLineSpan: section.$.barLineSpan === 'true',
-            thinBrackets: section.$.thinBrackets === 'true',
-            family: section.family,
-            unsorted: section.unsorted? section.unsorted.map((unsorted) => {
+            id: section.get('id'),
+            brackets: section.get('brackets') === 'true',
+            barLineSpan: section.get('barLineSpan') === 'true',
+            thinBrackets: section.get('thinBrackets') === 'true',
+            family,
+            unsorted: unsorted.map((unsorted_obj) => {
                 return {
-                    group: unsorted.$.group
+                    group: unsorted_obj.get('group')
                 }
-            }) : []
+            })
         }
     });
     // now we return an order of instruments and sections
@@ -405,49 +444,42 @@ export const readOrderInfo = (order) => {
 }
 
 
-
 /**
  * 
- * @param {ScoreStaff} staffs 
+ * @param {XmlWrapper[]} staffs 
  * @returns {FlatScoreStaff} reduced staff info
  */
 export const readStaffInfo = (staffs) => {
     return staffs.map((staff) => {
         
         const ret = {
-            id: staff.$.id,
-            Measure: staff.Measure.map((measure) => {
+            id: staff.get('id'),
+            Measure: staff.get('Measure').map((measure) => {
+                let voices = measure.get('voice');
+                if (!Array.isArray(voices)) {
+                    voices = [voices];
+                }
                 return {
-                    voice: measure.voice.map((voice) => {
-                        return {
-                            KeySig: voice.KeySig,
-                            TimeSig: voice.TimeSig,
-                            Tempo: voice.Tempo,
-                            Rest: voice.Rest,
-                            Dynamic: voice.Dynamic,
-                            Spanner: voice.Spanner,
-                            Chord: voice.Chord
-                        }
+                    voice: voices.map((voice) => {
+                        // the purpose here is a filter to only get the relevant information
+                        // now order becomes important, so we use the children instead.
+                        return voice.children.filter((child) => {
+                            return ['KeySig', 'TimeSig', 'Tempo', 'Rest', 'Dynamic', 'Spanner', 'Chord', 'Barline', 'VBox'].includes(child.name);
+                        });
+                        // 
+                        // return {
+                        //     KeySig: voice.KeySig,
+                        //     TimeSig: voice.TimeSig,
+                        //     Tempo: voice.Tempo,
+                        //     Rest: voice.Rest,
+                        //     Dynamic: voice.Dynamic,
+                        //     Spanner: voice.Spanner,
+                        //     Chord: voice.Chord,
+                        //     Barline: voice.Barline,
+                        // }
                     })
                 }
             })
-        }
-        if (staff.VBox) {
-            ret.VBox = staff.VBox.map((vbox) => {
-                return {
-                    height: vbox.height,
-                    eid: vbox.eid,
-                    linkedMain: vbox.linkedMain,
-                    Text: vbox.Text.map((text) => {
-                        return {
-                            eid: text.eid,
-                            linkedMain: text.linkedMain,
-                            style: text.style,
-                            text: text.text
-                        }
-                    })
-                }
-            });
         }
         return ret;
     });
@@ -459,26 +491,45 @@ export const renderMusicForStaff = (staffContents) => {
     const ret = staffContents.map((measure) => {
         const voices = measure.voice;
         return voices.map((voice) => {
-            let ret = "";
-            if (voice.KeySig) {
-                currentKeySig = voice.KeySig[0];
-                ret += renderKeySig(currentKeySig) + "\n";
-            }
-            if (voice.TimeSig) {
-                currentTimeSig = voice.TimeSig[0];
-                ret += "  " + parseTimeSig(currentTimeSig) + "\n";
-            }
-            if (voice.Rest) {
-                voice.Rest.forEach((rest) => {
-                    ret += " " + parseRest(rest, currentTimeSig);
-                });
-            }
-            if (voice.Chord) {
-                voice.Chord.forEach((chord) => {
-                    ret += " " + parseChord(chord, currentTimeSig, currentKeySig);
-                });
-            }
-            return ret;
+            return voice.map((evt) => {
+                switch (evt.name) {
+                    case 'KeySig': {
+                        currentKeySig = evt;
+                        return renderKeySig(evt);
+                    }
+                    case 'TimeSig': {
+                        currentTimeSig = evt;
+                        return parseTimeSig(evt);
+                    }
+                    case 'Rest': {
+                        return parseRest(evt, currentTimeSig);
+                    }
+                    case 'Chord': {
+                        return parseChord(evt, currentTimeSig, currentKeySig);
+                    }
+                    default: return '';
+                }
+            }).join(' ');
+            // let ret = "";
+            // if (voice.KeySig) {
+            //     currentKeySig = voice.KeySig[0];
+            //     ret += renderKeySig(currentKeySig) + "\n";
+            // }
+            // if (voice.TimeSig) {
+            //     currentTimeSig = voice.TimeSig[0];
+            //     ret += "  " + parseTimeSig(currentTimeSig) + "\n";
+            // }
+            // if (voice.Rest) {
+            //     voice.Rest.forEach((rest) => {
+            //         ret += " " + parseRest(rest, currentTimeSig);
+            //     });
+            // }
+            // if (voice.Chord) {
+            //     voice.Chord.forEach((chord) => {
+            //         ret += " " + parseChord(chord, currentTimeSig, currentKeySig);
+            //     });
+            // }
+            // return ret;
         });
     });
     return ret;
@@ -487,14 +538,14 @@ export const renderMusicForStaff = (staffContents) => {
 const renderStaff = (staff) => {
     const ret = {
         id: staff.id,
-        defaultClef: staff.defaultClef[0],
+        defaultClef: staff.defaultClef,
         isStaffVisible: staff.isStaffVisible? staff.isStaffVisible[0] : null,
         measures: renderMusicForStaff(staff.contents)
     };
     return ret;
 }
 
-const renderPart = (part, data) => {
+const renderPart = (part) => {
     const partName = part.trackName;
     const longName = part.instrument[0].longName;
     const shortName = part.instrument[0].shortName;
@@ -553,7 +604,7 @@ export const renderLilypond = (partsInfo, metaInfo, options = {}) => {
         scoreData: [], // in the score, the order does matter
         partData: {}
     };
-
+    debugger;
     partsInfo.forEach((partInfo) => {
         if (partInfo.isSection) {
             const parts = partInfo.parts.map((part) => {
@@ -660,20 +711,21 @@ export const renderLilypond = (partsInfo, metaInfo, options = {}) => {
 
 /**
  * 
- * @param {MSCData} MSCData MuseScore XML data converted to JS
+ * @param {XmlWrapper} data MuseScore XML data converted to JS
  * @returns 
  */
-export const convertMSCX2LY = (MSCData, options = {}) => {
+export const convertMSCX2LY = (data, options = {}) => {
     // step 1: Order
     // this is a list of instruments used, and adds the family attribute to the instruments
     // it also describes the sections of the score by family
-    const orderInfo = readOrderInfo(MSCData.museScore.Score[0].Order[0]);
+    const Score = data.get('Score');
+    const orderInfo = readOrderInfo(Score.get('Order'));
     // step 2: Staff
-    const staffInfo = readStaffInfo(MSCData.museScore.Score[0].Staff);
+    const staffInfo = readStaffInfo(Score.get('Staff'));
     // step 3: the parts
-    const partsInfo = readPartsInfo(MSCData.museScore.Score[0].Part, orderInfo, staffInfo);
+    const partsInfo = readPartsInfo(Score.get('Part'), orderInfo, staffInfo);
     // step 4: the meta info
-    const metaInfo = parseMetaTag(MSCData.museScore.Score[0].metaTag);
+    const metaInfo = parseMetaTag(Score.get('metaTag'));
     // with the parts info we have the parts in the order they are in the score
     // now we can start generating the lilypond structure
     // we will go throught the parts, section by section, and generate the lilypond structure and data
