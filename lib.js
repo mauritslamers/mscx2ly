@@ -487,7 +487,6 @@ export const readStaffInfo = (staffs) => {
         const ret = {
             id: staff.get('id'),
             Measure: staff.get('Measure').map((measure) => {
-                debugger;
                 let voices = measure.get('voice');
                 if (!Array.isArray(voices)) {
                     voices = [voices];
