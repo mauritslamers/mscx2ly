@@ -291,7 +291,7 @@ export const readPartInfo = (part, staffInfo) => {
             return staffdata.id === staff.get('id');
         });
         let defaultConcertClef = staff.get('defaultConcertClef')? staff.get('defaultConcertClef') : null;
-        let defaultClef = staff.get('defaultClef')? staff.get('defaultClef') || defaultConcertClef : null;
+        let defaultClef = staff.get('defaultClef')? staff.get('defaultClef') : defaultConcertClef;
         return {
             id: staff.get('id'),
             StaffType: staff.get('StaffType'),
