@@ -213,7 +213,7 @@ export const parseChord = (chord, timeSig, keySig) => {
     // this assumes that the value in subtype is of the format `r[sub_length]`
     // so r8 for a subdivision in 8ths
     const tremolo = chord.get('TremoloSingleChord');
-    if (tremolo && tremolo.length > 0) {
+    if (tremolo) {
         ret += `:${tremolo.get('subtype').substr(1)}`; // cut off the r at the beginning
     }
     return ret;
@@ -335,7 +335,6 @@ export const readPartsInfo = (parts, orderInfo, staffInfo) => {
         id: null,
         parts: []
     };
-    debugger;
     partsInfo.forEach((partInfo) => {
         // we trust the order of the instruments in the partInfo
         // take the instrumentId
@@ -604,7 +603,6 @@ export const renderLilypond = (partsInfo, metaInfo, options = {}) => {
         scoreData: [], // in the score, the order does matter
         partData: {}
     };
-    debugger;
     partsInfo.forEach((partInfo) => {
         if (partInfo.isSection) {
             const parts = partInfo.parts.map((part) => {
