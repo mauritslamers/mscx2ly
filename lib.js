@@ -51,16 +51,38 @@ const parseTimeSig = (timeSig) => {
 
 
 const durationMap = {
-    "1/64": "64",
-    "1/32": "32",
-    "1/16": "16",
-    "1/8": "8",
-    "1/4": "4",
-    "1/2": "2",
     "1": "1",
-    "2/2": "1",
+    "1/1": "1",
+    "1/2": "2",
+    "2/2": "2",
+    "1/4": "4",
     "2/4": "2",
     "3/4": "2.",
+    "4/4": "1",
+    "1/8": "8",
+    "2/8": "4",
+    "3/8": "4.",
+    "4/8": "2",
+    "6/8": "2.",
+    "8/8": "1",
+    "1/16": "16",
+    "2/16": "8",
+    "3/16": "8.",
+    "4/16": "4",
+    "6/16": "4.",
+    "8/16": "2",
+    "12/16": "2.",
+    "16/16": "1",
+    "1/32": "32",
+    "2/32": "16",
+    "3/32": "16.",
+    "4/32": "8",
+    "6/32": "8.",
+    "8/32": "4",
+    "12/32": "4.",
+    "16/32": "2",
+    "24/32": "2.",
+    "32/32": "1",
     "half": "2",
     "whole": "1",
     "quarter": "4",
@@ -394,7 +416,11 @@ export const readPartsInfo = (parts, orderInfo, staffInfo) => {
  */
 export const readOrderInfo = (order) => {
     // first: instruments
-    const instruments = order.get('instrument').map((instrument) => {
+    let instruments = order.get('instrument');
+    if (!Array.isArray(instruments)) {
+        instruments = [instruments];
+    }
+    instruments.map((instrument) => {
         let fam = instrument.get('family', true);
         if (!Array.isArray(fam)) {
             fam = [fam];
