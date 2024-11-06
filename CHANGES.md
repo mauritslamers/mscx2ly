@@ -1,3 +1,11 @@
+- 0.1.9
+    - proper error handling
+    - polyphonic voices
+    - partial bars
+    - parse file without Order lemma
+    - do not overwrite parts using the same name
+    - clef measure event
+    - warn for file versions
 - 0.1.8
     - adding 2/2 to the duration map
     - do not crash when no concertKey has been set
@@ -9,5 +17,4 @@
     - Fix order of events in bar
     - Add staff and parts paper option
     - Add staff and parts staff size option
-
 - 0.1.0 Initial release
