@@ -1,3 +1,6 @@
+- 0.1.8
+    - adding 2/2 to the duration map
+    - do not crash when no concertKey has been set
 - 0.1.7
     - Do not apply score staff size to parts
 - 0.1.6
