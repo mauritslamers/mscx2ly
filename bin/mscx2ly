@@ -61,7 +61,7 @@ program
             scorePaperSize: options.scorePapersize,
             partsPaperSize: options.partsPapersize,
             scoreStaffSize: options.scoreStaffsize,
-            partsStaffSize: options.scoreStaffsize
+            partsStaffSize: options.partsStaffsize
         });
     });
 program.parse(process.argv);
