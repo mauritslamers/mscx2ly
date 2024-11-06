@@ -624,6 +624,8 @@ export const renderLilypond = (partsInfo, metaInfo, options = {}) => {
         scoreData: [], // in the score, the order does matter
         partData: {}
     };
+    const musicKeyCount = {};
+    const partKeyCount = {};
     partsInfo.forEach((partInfo) => {
         if (partInfo.isSection) {
             const parts = partInfo.parts.map((part) => {
@@ -649,11 +651,28 @@ export const renderLilypond = (partsInfo, metaInfo, options = {}) => {
             // not a section, but a part
             const part = renderPart(partInfo, data);
             // we can now copy the musicdata to the data.musicData
+            
             Object.keys(part.musicData).forEach((key) => {
-                data.musicData[key] = part.musicData[key];
+                if (!data.musicData[key]) {
+                    data.musicData[key] = part.musicData[key];
+                    musicKeyCount[key] = 1;
+                }
+                else {
+                    musicKeyCount[key] += 1;
+                    const newKey = createValidPartName(`${key}${musicKeyCount[key]}`);
+                    data.musicData[newKey] = part.musicData[key];
+                }
             });
             Object.keys(part.partData).forEach((key) => {
-                data.partData[key] = part.partData[key];
+                if (!data.partData[key]) {
+                    data.partData[key] = part.partData[key];
+                    partKeyCount[key] = 1;
+                }
+                else {
+                    partKeyCount[key] += 1;
+                    const newKey = createValidPartName(`${key}${partKeyCount[key]}`);
+                    data.partData[newKey] = part.partData[key];
+                }
             });
             data.scoreData.push(part.scoreData);
         }   
