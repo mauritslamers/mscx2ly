@@ -25,6 +25,8 @@ program
     .option('--parts-file <file>', 'Save parts definitions to a separate file')
     .option('--score-papersize <size>', 'Set the paper size for the score')
     .option('--parts-papersize <size>', 'Set the paper size for the parts')
+    .option('--score-staffsize <size>', 'Set the font size for the score')
+    .option('--parts-staffsize <size>', 'Set the font size for the parts')
     .arguments('<source-file> [output-file]')
     .action((sourceFile, outputFile, options) => {
         if (!sourceFile) {
@@ -57,7 +59,9 @@ program
             separateScore: options.separateScore,
             separateParts: options.separateParts,
             scorePaperSize: options.scorePapersize,
-            partsPaperSize: options.partsPapersize
+            partsPaperSize: options.partsPapersize,
+            scoreStaffSize: options.scoreStaffsize,
+            partsStaffSize: options.scoreStaffsize
         });
     });
 program.parse(process.argv);

@@ -668,7 +668,14 @@ export const renderLilypond = (partsInfo, metaInfo, options = {}) => {
         // instrument name
         parts += `    instrument = "${key}"\n`;
         parts += "  }\n";
-        parts += `  \\score {\n ${data.partData[key]}\n  }\n`;
+        parts += "  \\score {\n"
+        parts += `     ${data.partData[key]}\n`
+        if (options.partsStaffSize) {
+            parts += "   \\layout {\n";
+            parts += `      #(layout-set-staff-size ${options.partsStaffSize})\n`;
+            parts += "   }\n";
+        }
+        parts += "  }\n";
         parts += "}\n";
     });
 
@@ -697,8 +704,14 @@ export const renderLilypond = (partsInfo, metaInfo, options = {}) => {
     data.scoreData.forEach((part) => {
         score += part;
     });
-    score += "  >>}\n";
-    score += "}\n";
+    score += "    >>\n";
+    if (options.scoreStaffSize) {
+        score += "   \\layout {\n";
+        score += `      #(layout-set-staff-size ${options.scoreStaffSize})\n`;
+        score += "   }\n";
+    }
+    score += "  }\n";
+    score += "}\n"; // book end
 
     return {
         music,
