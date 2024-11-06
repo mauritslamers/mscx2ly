@@ -496,7 +496,7 @@ export const readStaffInfo = (staffs) => {
                         // the purpose here is a filter to only get the relevant information
                         // now order becomes important, so we use the children instead.
                         return voice.children.filter((child) => {
-                            return ['KeySig', 'TimeSig', 'Tempo', 'Rest', 'Dynamic', 'Spanner', 'Chord', 'Barline', 'VBox'].includes(child.name);
+                            return ['KeySig', 'TimeSig', 'Tempo', 'Rest', 'Dynamic', 'Spanner', 'Chord', 'Barline', 'VBox', 'Clef'].includes(child.name);
                         });
                         // 
                         // return {
@@ -538,6 +538,10 @@ export const renderMusicForStaff = (staffContents) => {
                     }
                     case 'Chord': {
                         return parseChord(evt, currentTimeSig, currentKeySig);
+                    }
+                    case 'Clef': {
+                        const clef = evt.get('concertClefType') || evt.get('transposingClefType');
+                        return renderClef(clef);
                     }
                     default: return '';
                 }
