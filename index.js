@@ -29,45 +29,80 @@ export const mscx2ly = async ({
     if (separateParts && !partsFile) {
         partsFile = `${outputFile}_parts.ly`;
     }
-    // check if source is a zip file
-    const zip = new admZip(sourceFile);
-    const zipEntries = zip.getEntries();
-    const mscxEntry = zipEntries.find(entry => entry.entryName.endsWith('.mscx'));
-    // read source file
-    // const source = fs.readFileSync(sourceFile, 'utf8');
-    const source = zip.readAsText(mscxEntry);
-    // convert to json
-    const parser = new xml2js.Parser({ preserveChildrenOrder : true, explicitChildren: true});
-    const json = await parser.parseStringPromise(source);
-    // convert to a format we can interact with
-    const data = new XmlWrapper(json.museScore);
-    const result = convertMSCX2LY(data, { 
-        scorePaperSize, 
-        partsPaperSize,
-        scoreStaffSize,
-        partsStaffSize
-    });
-    // write output
-    let main = '\\version "2.24.0"\n\n';
-    if (!separateMusic) {
-        main += result.music + "\n";
+    // we first try to read the source file as a zip
+    // if that fails, we assume it is a text file
+    let source;
+    try {
+        const zip = new admZip(sourceFile);
+        const zipEntries = zip.getEntries();
+        const mscxEntry = zipEntries.find(entry => entry.entryName.endsWith('.mscx'));
+        // read source file
+        // const source = fs.readFileSync(sourceFile, 'utf8');
+        source = zip.readAsText(mscxEntry);
     }
-    if (!separateScore) {
-        main += result.score + "\n";
+    catch (e) {
+        // console.log('Could not read source file as zip. Assuming it is an uncompressed MuseScore file.');
+        source = fs.readFileSync(sourceFile, 'utf8');
     }
-    if (!separateParts) {
-        main += result.parts;
+
+    let json;
+    try {
+        // convert to json
+        const parser = new xml2js.Parser({ preserveChildrenOrder : true, explicitChildren: true});
+        json = await parser.parseStringPromise(source);
     }
-    fs.writeFileSync(outputFile, main);
-    if (separateMusic) {
-        fs.writeFileSync(musicFile, result.music);
+    catch (e) {
+        console.error('Could not parse source file. Is it a MuseScore file? Exiting.');
+        process.exit(1);
     }
-    if (separateScore) {
-        fs.writeFileSync(scoreFile, result.score);
+    let result;
+    try {
+        // convert to a format we can interact with
+        const data = new XmlWrapper(json.museScore);
+        result = convertMSCX2LY(data, { 
+            scorePaperSize, 
+            partsPaperSize,
+            scoreStaffSize,
+            partsStaffSize
+        });
     }
-    if (separateParts) {
-        fs.writeFileSync(partsFile, result.parts);
+    catch (e) {
+        const errorlog = e.stack;
+        fs.writeFileSync('error.log', errorlog);
+        console.error('mscx2ly encountered an error during the conversion process. Please report this issue on Github:');
+        console.error('https://github.com/mauritslamers/mscx2ly/issues');
+        console.error('Please include the generated error.log file and if possible the source file. Thank you!');
+        process.exit(1);
     }
-    console.log('Conversion complete');
-    process.exit(0);
+
+    try {
+        // write output
+        let main = '\\version "2.24.0"\n\n';
+        if (!separateMusic) {
+            main += result.music + "\n";
+        }
+        if (!separateScore) {
+            main += result.score + "\n";
+        }
+        if (!separateParts) {
+            main += result.parts;
+        }
+        fs.writeFileSync(outputFile, main);
+        if (separateMusic) {
+            fs.writeFileSync(musicFile, result.music);
+        }
+        if (separateScore) {
+            fs.writeFileSync(scoreFile, result.score);
+        }
+        if (separateParts) {
+            fs.writeFileSync(partsFile, result.parts);
+        }
+        console.log('Conversion complete');
+        process.exit(0);
+    }
+    catch (e) {
+        console.log(e);
+        console.error('Could not write output files. Exiting.');
+        process.exit(1);
+    }
 }
