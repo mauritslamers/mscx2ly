@@ -415,6 +415,12 @@ export const readPartsInfo = (parts, orderInfo, staffInfo) => {
  * @returns {OrderInfo}
  */
 export const readOrderInfo = (order) => {
+    if (!order) {
+        return {
+            instruments: [],
+            sections: []
+        }
+    }
     // first: instruments
     let instruments = order.get('instrument');
     if (!Array.isArray(instruments)) {
