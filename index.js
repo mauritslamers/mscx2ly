@@ -14,6 +14,8 @@ export const mscx2ly = async ({
     partsFile,
     scorePaperSize,
     partsPaperSize,
+    scoreStaffSize,
+    partsStaffSize
 }) => {
     // decide filenames
     if (separateMusic && !musicFile) {
@@ -32,7 +34,12 @@ export const mscx2ly = async ({
     const json = await parser.parseStringPromise(source);
     // convert to a format we can interact with
     const data = new XmlWrapper(json.museScore);
-    const result = convertMSCX2LY(data, { scorePaperSize, partsPaperSize });
+    const result = convertMSCX2LY(data, { 
+        scorePaperSize, 
+        partsPaperSize,
+        scoreStaffSize,
+        partsStaffSize
+    });
     // write output
     let main = '\\version "2.24.0"\n\n';
     if (!separateMusic) {
