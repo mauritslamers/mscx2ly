@@ -1,6 +1,6 @@
 {
   "name": "mscx2ly",
-  "version": "0.1.0",
+  "version": "0.1.5",
   "description": "Tool to render lilypond code from a MuseScore save file",
   "main": "index.js",
   "bin": {
