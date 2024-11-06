@@ -158,7 +158,7 @@ const noteNamesForKeySig = {
  */
 const convertMidiPitchToNoteName = (midiPitch, keySig) => {
     // list of note names indexed
-    const concertKey = keySig.get('concertKey');
+    const concertKey = keySig? keySig.get('concertKey'): 'plain';
     let keySigType = null;
     if (noteNamesForKeySig[concertKey]) {
         keySigType = concertKey;
