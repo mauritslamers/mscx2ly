@@ -18,7 +18,7 @@ From this it generates three outputs:
 The score and the parts depend on the macros generated in the music part.
 
 The tool allows you to save these parts in a single file as well as separate 
-files.
+files. 
 
 ## Install
 
@@ -27,14 +27,17 @@ npm install mscx2ly --global
 ```
 
 ## Use
-Save a MuseScore file as uncompressed, or unzip the compressed file.
-Then call:
-
 ```
-    mscx2ly sourcefile.mscx targetfile.ly
+    mscx2ly sourcefile.mscz targetfile.ly
 ```
 
-or use the other options.
+or use the other options. Run 
+
+```
+    mcsx2ly --help
+``` 
+
+for a list of options.
 
 ## Limitations
 This tool is currently limited in what it exports from MuseScore.

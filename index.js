@@ -2,6 +2,8 @@ import { convertMSCX2LY } from './lib.js';
 import fs from 'fs';
 import xml2js from 'xml2js';
 import { XmlWrapper } from './xml_wrapper.js';
+import admZip from 'adm-zip';
+
 
 export const mscx2ly = async ({
     sourceFile,
@@ -27,8 +29,13 @@ export const mscx2ly = async ({
     if (separateParts && !partsFile) {
         partsFile = `${outputFile}_parts.ly`;
     }
+    // check if source is a zip file
+    const zip = new admZip(sourceFile);
+    const zipEntries = zip.getEntries();
+    const mscxEntry = zipEntries.find(entry => entry.entryName.endsWith('.mscx'));
     // read source file
-    const source = fs.readFileSync(sourceFile, 'utf8');
+    // const source = fs.readFileSync(sourceFile, 'utf8');
+    const source = zip.readAsText(mscxEntry);
     // convert to json
     const parser = new xml2js.Parser({ preserveChildrenOrder : true, explicitChildren: true});
     const json = await parser.parseStringPromise(source);
