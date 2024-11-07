@@ -263,6 +263,47 @@ export function renderClef(clef) {
     }
 }
 
+
+export function renderBarLine(barLine) {
+    const type = barLine.get('subtype');
+    let str = '';
+    switch (type) {
+        case 'final': str = '|.'; break;
+        case 'end': str = '|.'; break;
+        case 'double': str = '||'; break;
+        case 'dashed': str = '!'; break;
+        case 'dotted': str = ';' ; break;
+        case 'reverse-end': str = '.|'; break;
+        case 'heavy': str = 'x-.'; break;
+        case 'double-heavy': str = '..'; break;
+        case null: {
+            // these are gregorian barlines
+            const fromOffset = parseInt(barLine.get('spanFromOffset'), 10);
+            const toOffset = parseInt(barLine.get('spanToOffset'), 10);
+            if (fromOffset === -1 && toOffset === -7) {
+                str = "'";
+            }
+            else if (fromOffset === -2 && toOffset === -6) {
+                // this is a longer version of the one above, Lilypond doesn't seem to have this by default
+                // as a \bar type
+                str = "'"; // return the same as the small
+            }
+            else if (fromOffset === -2 && toOffset === -2) {
+                str = ","; 
+            }
+            else if (fromOffset === -1 && toOffset === -1) {
+                // this is a longer version of the one above, Lilypond doesn't seem to have this by default
+                str = ","; // return the same as the small
+            }
+            break;
+        }
+    }       
+    if (str) {
+        return `\\bar "${str}"`;
+    }
+    else return ""; // no barline if we don't know what it is
+}
+
 /**
  * 
  * @param {Part} part 
@@ -482,6 +523,9 @@ export const readOrderInfo = (order) => {
  * @returns {FlatScoreStaff} reduced staff info
  */
 export const readStaffInfo = (staffs) => {
+    if (!Array.isArray(staffs)) {
+        staffs = [staffs];
+    }
     return staffs.map((staff) => {
         
         const ret = {
@@ -498,7 +542,7 @@ export const readStaffInfo = (staffs) => {
                         // the purpose here is a filter to only get the relevant information
                         // now order becomes important, so we use the children instead.
                         return voice.children.filter((child) => {
-                            return ['KeySig', 'TimeSig', 'Tempo', 'Rest', 'Dynamic', 'Spanner', 'Chord', 'Barline', 'VBox', 'Clef'].includes(child.name);
+                            return ['KeySig', 'TimeSig', 'Tempo', 'Rest', 'Dynamic', 'Spanner', 'Chord', 'BarLine', 'VBox', 'Clef'].includes(child.name);
                         });
                         // 
                         // return {
@@ -549,6 +593,9 @@ export const renderMusicForStaff = (staffContents) => {
                     case 'Clef': {
                         const clef = evt.get('concertClefType') || evt.get('transposingClefType');
                         return renderClef(clef);
+                    }
+                    case 'BarLine': {
+                        return renderBarLine(evt);
                     }
                     default: return '';
                 }

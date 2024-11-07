@@ -64,7 +64,6 @@ will inevitably transfer to other programs.
 ## Future additions
 In the future, I would like to add the following missing features:
 - repeats
-- special barlines
 - tempo
 - dynamics
 - texts such as "pizz." and "arco"
