@@ -138,7 +138,48 @@ export const parseRest = (rest, timeSig) => {
 
 
 const articulationMap = {
-    "articStaccatoBelow": "-."
+    "articStaccatoBelow": "-.",
+    "articAccentBelow": "->",
+    "articStaccatissimoBelow": "-!",
+    "articTenutoBelow": "--",
+    "articTenutoStaccatoBelow": "---.",
+    "articMarcatoAbove": "---^",
+    "articAccentStaccatoBelow": "->-.",
+    "articMarcatoStaccatoAbove": "-^-.",
+    "articMarcatoTenutoAbove": "-^--",
+    "articStacatissimoStrokeBelow": "-!", // this one doesn't exist in Lilypond, vertical line under a note
+    "articStacatissimoWedgeBelow": "-!", // this one doesn't exist in Lilypond, wedge under a note
+    "articStressBelow": "->", // this one doesn't exist in Lilypond, accent sign under a note
+    "articTenutoAccentBelow": "---^",
+    // "articUnstressBelow": "<", // this one doesn't exist in Lilypond, it looks like a text tie
+    "brassMuteOpen": "\\open",
+    "brassMuteClosed": "-+",
+    "stringsHarmonic": "\\flageolet",
+    "stringsUpBow": "\\upbow",
+    "stringsDownBow": "\\downbow",
+    "articLaisserVibrer": "\\laisserVibrer",
+    "articSoftAccentBelow": "\\espressivo", // espressivo
+    "articSoftAccentStaccatoBelow": "-.\\espressivo", // espressivo staccato
+    "articSoftAccentTenutoBelow": "--\\espressivo", // espressivo tenuto
+    "articSoftAccentStaccatoTenutoBelow": "---.\\espressivo", // espressivo staccato tenuto
+    // "guitarFadeIn": "\\fadein", // this one doesn't exist in Lilypond
+    // "guitarFadeOut": "\\fadeout", // this one doesn't exist in Lilypond
+    // "guitarVolumeSwell": "\\swell", // this one doesn't exist in Lilypond
+    // "wiggleSawtooth": "\\sawtooth", // this one doesn't exist in Lilypond
+    // "wiggleSawtoothWide": "\\sawtoothWide", // this one doesn't exist in Lilypond
+    // "wiggleVibratoLargeFaster": "\\vibratoLargeFaster", // this one doesn't exist in Lilypond
+    // "wiggleVibratoLargeSlowest": "\\vibratoLargeSlowest", // this one doesn't exist in Lilypond
+    "pluckedSnapPizzicatoAbove": "\\snappizzicato"
+}
+
+
+export const renderArticulation = (articulation) => {
+    const type = articulation.get('subtype');
+    const ret = articulationMap[type];
+    if (!ret) { 
+        return ""; // nothing to do
+    }
+    return ret;
 }
 
 
@@ -238,6 +279,13 @@ export const parseChord = (chord, timeSig, keySig) => {
     const tremolo = chord.get('TremoloSingleChord');
     if (tremolo) {
         ret += `:${tremolo.get('subtype').substr(1)}`; // cut off the r at the beginning
+    }
+    let articulation = chord.get('Articulation');
+    if (articulation) {
+        if (!Array.isArray(articulation)) {
+            articulation = [articulation];
+        }
+        ret += articulation.map(renderArticulation).join(' ');
     }
     return ret;
 }
