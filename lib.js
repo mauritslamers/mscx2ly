@@ -712,7 +712,7 @@ const renderPart = (part) => {
         tmpScoreData += `    \\${partDataName}\n`;
         tmpScoreData += '  }\n';
         ret.scoreData.push(tmpScoreData);
-        ret.partData[partName] = `\\new Staff { \\${partDataName} }\n`;
+        ret.partData[partName] = `\\new Staff { ${clefname} \n   \\${partDataName} }\n`;
     }
     return ret;
 }
