@@ -23,10 +23,18 @@ program
     .option('--music-file <file>', 'Save music definitions to a separate file')
     .option('--score-file <file>', 'Save score definitions to a separate file')
     .option('--parts-file <file>', 'Save parts definitions to a separate file')
+    .option('--omit-parts', 'Do not render parts')	
+    .option('--omit-score', 'Do not render score')
+    .option('--omit-music', 'Do not render music')
     .option('--score-papersize <size>', 'Set the paper size for the score')
     .option('--parts-papersize <size>', 'Set the paper size for the parts')
     .option('--score-staffsize <size>', 'Set the font size for the score')
     .option('--parts-staffsize <size>', 'Set the font size for the parts')
+    
+    // .option('--no-staccato', 'Do not render staccato articulations')
+    // .option('--no-accent', 'Do not render accent articulations')
+    // .option('--no-tenuto', 'Do not render tenuto articulations')
+    // .option('--no-marcato', 'Do not render marcato articulations')
     .arguments('<source-file> [output-file]')
     .action((sourceFile, outputFile, options) => {
         if (!sourceFile) {
@@ -58,10 +66,19 @@ program
             separateMusic: options.separateMusic,
             separateScore: options.separateScore,
             separateParts: options.separateParts,
-            scorePaperSize: options.scorePapersize,
-            partsPaperSize: options.partsPapersize,
-            scoreStaffSize: options.scoreStaffsize,
-            partsStaffSize: options.partsStaffsize
+            omitMusic: options.omitMusic !== undefined? options.omitMusic : false,
+            omitScore: options.omitScore !== undefined? options.omitScore : false,
+            omitParts: options.omitParts !== undefined? options.omitParts : false,
+            renderingOptions: {
+                scorePaperSize: options.scorePapersize,
+                partsPaperSize: options.partsPapersize,
+                scoreStaffSize: options.scoreStaffsize,
+                partsStaffSize: options.partsStaffsize,
+                // omitStaccato: options.noStaccato,
+                // omitAccent: options.noAccent,
+                // omitTenuto: options.noTenuto,
+                // omitMarcato: options.noMarcato
+            }
         });
     });
 program.parse(process.argv);

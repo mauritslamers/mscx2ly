@@ -35,10 +35,10 @@ export const mscx2ly = async ({
     musicFile,
     scoreFile,
     partsFile,
-    scorePaperSize,
-    partsPaperSize,
-    scoreStaffSize,
-    partsStaffSize
+    omitMusic,
+    omitScore,
+    omitParts,
+    renderingOptions,
 }) => {
     // decide filenames
     if (separateMusic && !musicFile) {
@@ -84,12 +84,7 @@ export const mscx2ly = async ({
         if (versions.createdWith.major < 4 || versions.formatVersion.major < 4) {
             console.warn(`This file was created with an older version of MuseScore ${versions.createdWith.text}. Fingers crossed!`);
         }
-        result = convertMSCX2LY(data, { 
-            scorePaperSize, 
-            partsPaperSize,
-            scoreStaffSize,
-            partsStaffSize
-        });
+        result = convertMSCX2LY(data, renderingOptions);
     }
     catch (e) {
         const errorlog = e.stack;
@@ -103,23 +98,23 @@ export const mscx2ly = async ({
     try {
         // write output
         let main = '\\version "2.24.0"\n\n';
-        if (!separateMusic) {
+        if (!separateMusic && !omitMusic) {
             main += result.music + "\n";
         }
-        if (!separateScore) {
+        if (!separateScore && !omitScore) {
             main += result.score + "\n";
         }
-        if (!separateParts) {
+        if (!separateParts && !omitParts) {
             main += result.parts;
         }
         fs.writeFileSync(outputFile, main);
-        if (separateMusic) {
+        if (separateMusic && !omitMusic) {
             fs.writeFileSync(musicFile, result.music);
         }
-        if (separateScore) {
+        if (separateScore && !omitScore) {
             fs.writeFileSync(scoreFile, result.score);
         }
-        if (separateParts) {
+        if (separateParts && !omitParts) {
             fs.writeFileSync(partsFile, result.parts);
         }
         console.log('Conversion complete');
