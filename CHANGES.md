@@ -1,3 +1,7 @@
+- 0.1.10
+    - fix missing clef in parts
+    - special barline support (without repeat)
+    - note based articulations
 - 0.1.9
     - proper error handling
     - polyphonic voices
