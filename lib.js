@@ -295,6 +295,22 @@ export const parseChord = (chord, timeSig, keySig) => {
         }
         ret += articulation.map(renderArticulation).join(' ');
     }
+    let spanner = chord.get('Spanner');
+    if (spanner) {
+        if (!Array.isArray(spanner)) {
+            spanner = [spanner];
+        }
+        spanner.forEach((span) => {
+            if (span.get('type') === 'Slur') {
+                if (span.get('next')) {
+                    ret += '(';
+                }
+                if (span.get('prev')) {
+                    ret += ')';
+                }
+            }
+        });
+    }
     if (hasTie) {
         ret += ' ~';
     }
