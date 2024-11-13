@@ -590,19 +590,21 @@ export const readStaffInfo = (staffs) => {
                         // the purpose here is a filter to only get the relevant information
                         // now order becomes important, so we use the children instead.
                         return voice.children.filter((child) => {
-                            return ['KeySig', 'TimeSig', 'Tempo', 'Rest', 'Dynamic', 'Spanner', 'Chord', 'BarLine', 'VBox', 'Clef'].includes(child.name);
+                            return [
+                                'KeySig', 
+                                'TimeSig', 
+                                'Tempo', 
+                                'Rest', 
+                                'Dynamic', 
+                                'Spanner', 
+                                'Chord', 
+                                'BarLine', 
+                                'VBox', 
+                                'Clef',
+                                'Fermata',
+                                'PlayTechAnnotation' // this is for pizz and arco
+                            ].includes(child.name);
                         });
-                        // 
-                        // return {
-                        //     KeySig: voice.KeySig,
-                        //     TimeSig: voice.TimeSig,
-                        //     Tempo: voice.Tempo,
-                        //     Rest: voice.Rest,
-                        //     Dynamic: voice.Dynamic,
-                        //     Spanner: voice.Spanner,
-                        //     Chord: voice.Chord,
-                        //     Barline: voice.Barline,
-                        // }
                     })
                 }
             })
@@ -611,10 +613,93 @@ export const readStaffInfo = (staffs) => {
     });
 };
 
+const fermatas = {
+    fermataAbove: "\\fermata",
+    fermataBelow: "_\\fermata",
+    fermataShortAbove: "\\shortfermata",
+    fermataShortBelow: "_\\shortfermata",
+    fermataLongAbove: "\\longfermata",
+    fermataLongBelow: "_\\longfermata",
+    fermataLongHenzeAbove: "\\henzelongfermata",
+    fermataLongHenzeBelow: "_\\henzelongfermata",
+    fermataShortHenzeAbove: "\\henzeshortfermata",
+    fermataShortHenzeBelow: "_\\henzeshortfermata",
+    fermataVeryLongAbove: "\\verylongfermata",
+    fermataVeryLongBelow: "_\\verylongfermata",
+    fermataVeryShortAbove: "\\veryshortfermata",
+    fermataVeryShortBelow: "_\\veryshortfermata",
+}
+
+export const renderFermata = (fermata) => {
+    const type = fermata.get('subtype');
+    return fermatas[type] || "";
+}
+
+export const renderHairPin = (spanner) => {
+    const isEnd = !!spanner.get('prev');
+    if (isEnd) { 
+        return "\\!";
+    }
+    const hairpin = spanner.get('HairPin'); // this will be null when isEnd
+    const isStart = !!spanner.get('next');
+    const subType = hairpin.get('subtype'); // 0 for cresc, 1 for decresc
+    const type = subType === '0'? '\\<' : '\\>';
+    return type;
+}
+
+
+export const renderSpanner = (spanner) => {
+    const type = spanner.get('type'); // xml attribute
+    const typeObject = spanner.get(type); // xml object named after the xml attribute type
+    const isStart = !!spanner.get('next');
+    const isEnd = !!spanner.get('prev');
+    if (!typeObject && !isEnd) {
+        // this means that the spanner does not exist as a subchild
+        console.log('spanner type not found:', type);
+        return "";
+    }
+    if (type === 'HairPin') {
+        return renderHairPin(spanner);
+    }
+}
+
+class OnceConsumer {
+    constructor (type = 'fifo') {
+        this.data = {};
+        this.type = type; // fifo or lifo
+    }
+
+    set (key, value) {
+        if (!this.data[key]) {
+            this.data[key] = [value];
+        }
+        else {
+            this.data[key].push(value);
+        }
+    }
+
+    has (key) {
+        return this.data[key] && this.data[key].length > 0;
+    }
+
+    get (key) {
+        if (this.data[key] && this.data[key].length > 0) {
+            if (this.type === 'lifo') {
+                return this.data[key].pop();
+            }
+            else {
+                return this.data[key].shift();
+            }
+        }
+    }
+}
+
+
 export const renderMusicForStaff = (staffContents) => {
     let currentKeySig = null;
     let currentTimeSig = null;
     const ret = staffContents.map((measure) => {
+        // TODO: we need to do something about the transposition
         let measureText = "";
         if (measure.len) {
             // we assume a \partial for now
@@ -622,6 +707,8 @@ export const renderMusicForStaff = (staffContents) => {
         }
         const voices = measure.voice;
         const parsedVoices = voices.map((voice) => {
+            // we need to keep the fermata, as in Lilypond it should always follow the event it is attached to
+            const voiceConsumer = new OnceConsumer('lifo');
             return voice.map((evt) => {
                 switch (evt.name) {
                     case 'KeySig': {
@@ -633,10 +720,30 @@ export const renderMusicForStaff = (staffContents) => {
                         return parseTimeSig(evt);
                     }
                     case 'Rest': {
-                        return parseRest(evt, currentTimeSig);
+                        let renderedRest = parseRest(evt, currentTimeSig);
+                        if (voiceConsumer.has('spanner')) {
+                            renderedRest = `${renderedRest}${voiceConsumer.get('spanner')}`;
+                        }
+                        if (voiceConsumer.has('text')) {
+                            renderedRest = `${renderedRest}${voiceConsumer.get('text')}`;
+                        }
+                        if (voiceConsumer.has('fermata')) {
+                            renderedRest = `${renderedRest}${voiceConsumer.get('fermata')}`;
+                        }
+                        return renderedRest;
                     }
                     case 'Chord': {
-                        return parseChord(evt, currentTimeSig, currentKeySig);
+                        let renderedChord = parseChord(evt, currentTimeSig, currentKeySig);
+                        if (voiceConsumer.has('spanner')) {
+                            renderedChord = `${renderedChord}${voiceConsumer.get('spanner')}`;
+                        }
+                        if (voiceConsumer.has('text')) {
+                            renderedChord = `${renderedChord}${voiceConsumer.get('text')}`;
+                        }
+                        if (voiceConsumer.has('fermata')) {
+                            renderedChord = `${renderedChord}${voiceConsumer.get('fermata')}`;
+                        }
+                        return renderedChord;
                     }
                     case 'Clef': {
                         const clef = evt.get('concertClefType') || evt.get('transposingClefType');
@@ -644,6 +751,20 @@ export const renderMusicForStaff = (staffContents) => {
                     }
                     case 'BarLine': {
                         return renderBarLine(evt);
+                    }
+                    case 'Fermata': {	
+                        voiceConsumer.set('fermata', renderFermata(evt));
+                        break;
+                    }
+                    case 'PlayTechAnnotation': {
+                        const text = `^\\markup { \\italic ${evt.get('text')} }`;
+                        voiceConsumer.set('text', text);
+                        break;
+                    }
+                    case 'Spanner': {
+                        const spanner = renderSpanner(evt);
+                        voiceConsumer.set('spanner', spanner);
+                        break;
                     }
                     default: return '';
                 }
