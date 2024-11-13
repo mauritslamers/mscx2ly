@@ -409,6 +409,8 @@ export const readPartInfo = (part, staffInfo) => {
             maxPitchP: instrument.get('maxPitchP'),
             minPitchA: instrument.get('minPitchA'),
             maxPitchA: instrument.get('maxPitchA'),
+            transposeDiatonic: instrument.get('transposeDiatonic'),
+            transposeChromatic: instrument.get('transposeChromatic'),
             instrumentId: instrument.get('instrumentId'),
             clef: instrument.get('clef'),
             Channel: instrChannel.map((channel) => {
@@ -852,10 +854,92 @@ const renderStaff = (staff) => {
     return ret;
 }
 
+const diatonics = ['c', 'd', 'e', 'f', 'g', 'a', 'b', 'c'];
+const chromatics = [2, 2, 1, 2, 2, 2, 1];
+
+const calculateTransposition = (part) => {
+    const instr = part.instrument[0];
+    let diatonic = instr.transposeDiatonic;
+    let chromatic = Math.abs(instr.transposeChromatic);
+    let octaves = 0;
+    if (!diatonic && !chromatic) {
+        return null; // nothing to do
+    }
+    // if the diatonic is a multiple of 7 and the chromatic is a multiple of 12, we don't need to transpose
+    if (Math.abs(diatonic) % 7 === 0 && Math.abs(chromatic) % 12 === 0) {
+        return null;
+    }
+
+    // support for transpositions bigger than an octave:
+    // first the diatonic and chromatic needs be brought within the octave
+    // but we store the amount of octaves we took out
+    // we add that to the endnote
+    if (Math.abs(diatonic) > 7) {
+        octaves = Math.floor(diatonic / 7); // we want to keep the sign
+        diatonic = diatonic % 7;
+        chromatic = chromatic % 12; // bring it back to the octave
+    }
+    // we need to express the transposition through \\transpose and wrap the music in a { } block
+    // what we do need to do here though is the c to [x] mapping, the transpose block can be done in renderPart
+    // in case of diatonic -1 and chromatic -2, it means c to d (as we inverse)
+    // so: diatonic means from c do x steps up => Math.abs(diatonic);
+    // chromatic indicates what kind of alteration we need to apply to the diatonic
+    // in case of -1, -3 it means c to dis 
+    // in case of -2, -3 it means c to es
+    const isUp = diatonic > 0; 
+    const stepNames = isUp? diatonics.reverse() : diatonics;
+    const chromaticValues = isUp > 0? chromatics.reverse() : chromatics;
+    // now the process is identical, walk the diatonic steps, calculate the chromatic value
+    let totalChromatic = 0;
+    let endName = stepNames[Math.abs(diatonic)];
+    for (let i = 0; i < Math.abs(diatonic); i++) {
+        totalChromatic += chromaticValues[i];
+    }
+    if (isUp) {
+        if (chromatic > totalChromatic) {
+            // c is start, need the second name + extension
+            if (endName === 'a' || endName === 'e') {
+                endName += 's';
+            }
+            else {
+                endName += 'es';
+            }
+        }
+        else if (chromatic < totalChromatic) {
+            endName += 'is';
+        }
+    }
+    else {
+        if (chromatic > totalChromatic) {
+            endName += 'is';
+        }
+        else if (chromatic < totalChromatic) {
+            // c is start, need the second name + extension
+            if (endName === 'a' || endName === 'e') {
+                endName += 's';
+            }
+            else {
+                endName += 'es';
+            }
+        }
+    }
+    if (octaves) {
+        if (octaves > 0) {
+            endName += `,`.repeat(octaves);
+        }
+        if (octaves < 0) {
+            endName += `'`.repeat(octaves);
+        }
+    }
+    return `c ${endName}`;
+}
+
+
 const renderPart = (part) => {
     const partName = part.trackName;
     const longName = part.instrument[0].longName;
     const shortName = part.instrument[0].shortName;
+    const transposition = calculateTransposition(part);
     const ret = {
         musicData: {},
         scoreData: [], // in the score, the order does matter
@@ -878,7 +962,9 @@ const renderPart = (part) => {
             const clefname = renderClef(staff.defaultClef);
             tmpScoreData += "\\new Staff {\n";
             tmpScoreData += `    ${clefname} \n`;
+            if (transposition) tmpScoreData += `    \\transpose ${transposition} { \n`;
             tmpScoreData += `    \\${partDataName}\n`; 
+            if (transposition) tmpScoreData += `    }\n`;
             tmpScoreData += `}\n`;
         });
         tmpScoreData += ">>\n";
@@ -894,7 +980,9 @@ const renderPart = (part) => {
         tmpScoreData += `    \\set Staff.instrumentName = "${longName}"\n`;
         tmpScoreData += `    \\set Staff.shortInstrumentName = "${shortName}"\n`;
         tmpScoreData += `    ${clefname} \n`;
+        if (transposition) tmpScoreData += `    \\transpose ${transposition} { \n`;
         tmpScoreData += `    \\${partDataName}\n`;
+        if (transposition) tmpScoreData += `    }\n`;
         tmpScoreData += '  }\n';
         ret.scoreData.push(tmpScoreData);
         ret.partData[partName] = `\\new Staff { ${clefname} \n   \\${partDataName} }\n`;
