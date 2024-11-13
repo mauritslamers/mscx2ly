@@ -265,7 +265,15 @@ export const parseChord = (chord, timeSig, keySig) => {
     if (!Array.isArray(noteInfo)) {
         noteInfo = [noteInfo];
     }
+    let hasTie = false;
     const notes = noteInfo.map((note) => {
+        let spanner = note.get('Spanner');
+        if (spanner) {
+            if (!Array.isArray(spanner)) spanner = [spanner];
+            hasTie = spanner.some((span) => {
+                return span.get('type') === 'Tie' && span.get('next');
+            });    
+        }
         return parseNote(note, keySig);
     });
     let ret;
@@ -286,6 +294,9 @@ export const parseChord = (chord, timeSig, keySig) => {
             articulation = [articulation];
         }
         ret += articulation.map(renderArticulation).join(' ');
+    }
+    if (hasTie) {
+        ret += ' ~';
     }
     return ret;
 }
