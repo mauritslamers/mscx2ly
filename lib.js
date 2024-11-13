@@ -694,6 +694,32 @@ class OnceConsumer {
     }
 }
 
+export const renderDynamic = (dynamic) => {
+    const type = dynamic.get('subtype');
+    let ret = '';
+    switch (type) {
+        case 'ppp': ret = '\\ppp'; break;
+        case 'pp': ret = '\\pp'; break;
+        case 'p': ret = '\\p'; break;
+        case 'mp': ret = '\\mp'; break;
+        case 'mf': ret = '\\mf'; break;
+        case 'f': ret = '\\f'; break;
+        case 'ff': ret = '\\ff'; break;
+        case 'fff': ret = '\\fff'; break;
+        case 'fp': ret = '\\fp'; break;
+        case 'pf': ret = '\\pf'; break;
+        case 'sf': ret = '\\sf'; break;
+        case 'sfz': ret = '\\sfz'; break;
+        case 'sff': ret = '\\sff'; break;
+        case 'sffz': ret = '\\sffz';
+        case 'sfp': ret = '\\sfp'; break;
+        case 'rfz': ret = '\\rfz'; break;
+        case 'rf': ret = '\\rf'; break;
+        case 'fz': ret = '\\fz'; break;        
+    }
+    return ret;
+}
+
 
 export const renderMusicForStaff = (staffContents) => {
     let currentKeySig = null;
@@ -721,6 +747,9 @@ export const renderMusicForStaff = (staffContents) => {
                     }
                     case 'Rest': {
                         let renderedRest = parseRest(evt, currentTimeSig);
+                        if (voiceConsumer.has('dynamic')) {
+                            renderedRest = `${renderedRest}${voiceConsumer.get('dynamic')}`;
+                        }
                         if (voiceConsumer.has('spanner')) {
                             renderedRest = `${renderedRest}${voiceConsumer.get('spanner')}`;
                         }
@@ -734,6 +763,9 @@ export const renderMusicForStaff = (staffContents) => {
                     }
                     case 'Chord': {
                         let renderedChord = parseChord(evt, currentTimeSig, currentKeySig);
+                        if (voiceConsumer.has('dynamic')) {
+                            renderedChord = `${renderedChord}${voiceConsumer.get('dynamic')}`;
+                        }
                         if (voiceConsumer.has('spanner')) {
                             renderedChord = `${renderedChord}${voiceConsumer.get('spanner')}`;
                         }
@@ -764,6 +796,11 @@ export const renderMusicForStaff = (staffContents) => {
                     case 'Spanner': {
                         const spanner = renderSpanner(evt);
                         voiceConsumer.set('spanner', spanner);
+                        break;
+                    }
+                    case 'Dynamic': {
+                        const dynamic = renderDynamic(evt);
+                        voiceConsumer.set('dynamic', dynamic);
                         break;
                     }
                     default: return '';
