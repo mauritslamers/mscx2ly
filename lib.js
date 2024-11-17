@@ -985,7 +985,12 @@ const renderPart = (part) => {
         if (transposition) tmpScoreData += `    }\n`;
         tmpScoreData += '  }\n';
         ret.scoreData.push(tmpScoreData);
-        ret.partData[partName] = `\\new Staff { ${clefname} \n   \\${partDataName} }\n`;
+        let tmpPartData = `\\new Staff { \n`;
+        if (transposition) tmpPartData += `    \\transpose ${transposition} { \n`;
+        tmpPartData +=  `${clefname} \n   \\${partDataName } \n`;
+        if (transposition) tmpPartData += `    }\n`;
+        tmpPartData += `}\n`;
+        ret.partData[partName] = tmpPartData;
     }
     return ret;
 }
