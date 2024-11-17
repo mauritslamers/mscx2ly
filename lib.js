@@ -824,12 +824,12 @@ export const renderMusicForStaff = (staffContents) => {
                     }
                     case 'Spanner': {
                         const spanner = renderSpanner(evt);
-                        voiceConsumer.set('spanner', spanner);
+                        if (spanner) voiceConsumer.set('spanner', spanner);
                         break;
                     }
                     case 'Dynamic': {
                         const dynamic = renderDynamic(evt);
-                        voiceConsumer.set('dynamic', dynamic);
+                        if (dynamic) voiceConsumer.set('dynamic', dynamic);
                         break;
                     }
                     default: return '';
