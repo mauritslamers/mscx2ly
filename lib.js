@@ -46,6 +46,7 @@ export const renderKeySig = (keySig) => {
 const parseTimeSig = (timeSig) => {
     const n = timeSig.get('sigN');
     const d = timeSig.get('sigD');
+    if (!n || !d) return "";
     return `\\time ${n}/${d}`;
 }
 
