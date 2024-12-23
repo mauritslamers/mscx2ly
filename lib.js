@@ -691,6 +691,10 @@ export const renderSpanner = (spanner) => {
     if (type === 'HairPin') {
         return renderHairPin(spanner);
     }
+    else {
+        console.log('spanner type not implemented:', type);	
+    }
+    return ""; 
 }
 
 class OnceConsumer {
