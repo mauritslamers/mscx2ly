@@ -334,6 +334,7 @@ export function renderClef(clef) {
         case 'F8vb': return '\\clef "bass_8"';
         case 'G8va': return '\\clef "treble^8"';
         case 'G15ma': return '\\clef "treble^15"';
+        case 'PERC': return '\\clef percussion';
         default: return '\\clef treble';
     }
 }
@@ -750,9 +751,11 @@ export const renderDynamic = (dynamic) => {
 }
 
 
-export const renderMusicForStaff = (staffContents) => {
+export const renderMusicForStaff = (staff) => {
+    const staffContents = staff.contents;
     let currentKeySig = null;
     let currentTimeSig = null;
+    const isPercussion = staff.defaultClef === 'PERC';
     const ret = staffContents.map((measure) => {
         // TODO: we need to do something about the transposition
         let measureText = "";
@@ -767,8 +770,10 @@ export const renderMusicForStaff = (staffContents) => {
             return voice.map((evt) => {
                 switch (evt.name) {
                     case 'KeySig': {
+                        if (!isPercussion) {
                         currentKeySig = evt;
                         return renderKeySig(evt);
+                        }
                     }
                     case 'TimeSig': {
                         currentTimeSig = evt;
@@ -849,7 +854,7 @@ const renderStaff = (staff) => {
         id: staff.id,
         defaultClef: staff.defaultClef,
         isStaffVisible: staff.isStaffVisible? staff.isStaffVisible[0] : null,
-        measures: renderMusicForStaff(staff.contents)
+        measures: renderMusicForStaff(staff)
     };
     return ret;
 }
