@@ -1096,6 +1096,22 @@ const calculateTransposition = (part) => {
     return `c ${endName}`;
 }
 
+const renderLyrics = (lyrics) => {
+    const ret = [];
+    for (const lyric of lyrics) {
+        let lyricText = lyric.text;
+        if (lyricText.includes('"')) {
+            lyricText = lyricText.replace(/"/g, '\\"');
+            lyricText = `"${lyricText}"`;
+        }
+        ret.push(lyricText);
+        if (lyric.syllabic && lyric.syllabic !== 'end') {
+            ret.push('--');
+        }
+    }
+    return ret.join(" ");
+}
+
 
 const renderPart = (part) => {
     const partName = part.trackName;
@@ -1137,23 +1153,50 @@ const renderPart = (part) => {
     }
     else {
         const renderedStaff = renderStaff(part.staffs[0]);
+        const staffHasLyrics = renderedStaff.lyrics && renderedStaff.lyrics.length;
         const partDataName = createValidPartName(partName);
         ret.musicData[partDataName] = renderedStaff.measures;
         const clefname = renderClef(part.staffs[0].defaultClef);
+        // render the score contents for the Score 
         let tmpScoreData = "  \\new Staff {\n";
         tmpScoreData += `    \\set Staff.instrumentName = "${longName}"\n`;
         tmpScoreData += `    \\set Staff.shortInstrumentName = "${shortName}"\n`;
         tmpScoreData += `    ${clefname} \n`;
+        if (staffHasLyrics) {
+            tmpScoreData += `     \\new Voice = "${partDataName}" {\n`;
+        }
         if (transposition) tmpScoreData += `    \\transpose ${transposition} { \n`;
         tmpScoreData += `    \\${partDataName}\n`;
         if (transposition) tmpScoreData += `    }\n`;
+        if (staffHasLyrics) {
+            tmpScoreData += `     }\n`;
+        }
         tmpScoreData += '  }\n';
+        if (staffHasLyrics) {
+            tmpScoreData += `   \\new Lyrics \\lyricsto "${partDataName}" { \n `;
+            // write out lyrics
+            tmpScoreData += `      ${renderLyrics(renderedStaff.lyrics)} \n   } \n`;
+        }
         ret.scoreData.push(tmpScoreData);
+
+        // render the score contents for sthe separate part
         let tmpPartData = `\\new Staff { \n`;
         if (transposition) tmpPartData += `    \\transpose ${transposition} { \n`;
         tmpPartData +=  `${clefname} \n   \\${partDataName } \n`;
+        if (staffHasLyrics) {
+            tmpPartData += `     \\new Voice = ${partDataName} {\n`;
+        }
         if (transposition) tmpPartData += `    }\n`;
+        if (staffHasLyrics) {
+            tmpScoreData += `     }\n`;
+        }
         tmpPartData += `}\n`;
+        if (staffHasLyrics) {
+            tmpPartData += `   \\new Lyrics \\lyricsto "${partDataName}" { \n `;
+            // write out lyrics
+            tmpPartData += `      ${renderLyrics(renderedStaff.lyrics)} \n   } \n`;
+        }
+
         ret.partData[partName] = tmpPartData;
         ret.lyricData.push(renderedStaff.lyrics);
     }
