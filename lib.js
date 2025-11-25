@@ -111,6 +111,11 @@ export const createValidPartName = (partName) => {
 }
 
 
+export const getDurationFor = (evt) => {
+    const duration = evt.get('duration') ? evt.get('duration') : evt.get('durationType');
+    return durationMap[duration];
+}
+
 /**
  * 
  * @param {Rest} rest 
@@ -135,6 +140,19 @@ export const parseRest = (rest, timeSig) => {
     else {
         return `r${duration}`;
     }
+}
+
+const metronomeNoteSymbolMap = {
+    "metNoteQuarterUp": 4,
+    "metNoteQuarterDown": 4,
+    "metNoteHalfUp": 2,
+    "metNoteHalfDown": 2,
+    "metNoteWholeUp": 1,
+    "metNoteWholeDown": 1,
+    "metNoteEighthUp": 8,
+    "metNoteEighthDown": 8,
+    "metNote16thUp": 16,
+    "metNote16thDown": 16,
 }
 
 
@@ -257,7 +275,7 @@ const parseNote = (note, keySig) => {
  * @param {Chord} chord
  * @param {TimeSig} timeSig 
  */
-export const parseChord = (chord, timeSig, keySig) => {
+export const parseChord = (chord, timeSig, keySig, lyric) => {
     const dur = durationMap[chord.get('durationType')];
     const dots = chord.get('dots')? parseInt(chord.get('dots'), 10) : 0;
     const duration = dur + '.'.repeat(dots);
@@ -313,7 +331,27 @@ export const parseChord = (chord, timeSig, keySig) => {
         });
     }
     if (hasTie) {
+        if (lyric) {
+            if (lyric.isDone === undefined) {
+                lyric.isDone = false;
+            }
+            else {
+                lyric.end += 4/parseFloat(dur);
+            }
+        }
         ret += ' ~';
+    }
+    else {
+        // add the duration to the lyric
+        if (lyric) {
+            if (lyric.isDone === undefined) {
+                lyric.isDone = true;
+            }
+            else { // continuing from previous note
+                lyric.end += 4/parseFloat(dur);
+                lyric.isDone = true;
+            }
+        }
     }
     return ret;
 }
@@ -485,7 +523,7 @@ export const readPartsInfo = (parts, orderInfo, staffInfo) => {
         const instrumentId = partInfo.instrument[0].instrumentId;
         // console.log('instrumentId:', instrumentId);
         const section = orderInfo.sections.find((section) => {
-            const sharesSectionFamilies = section.family.some((family) => {
+            const sharesSectionFamilies = [section.family].flat().some((family) => {
                 return instrumentId.includes(family);
             });
             const sharesSectionId = instrumentId.includes(section.id);
@@ -562,7 +600,11 @@ export const readOrderInfo = (order) => {
         }
     });
     // second: sections
-    const sections = order.get('section').map((section) => {
+    let sections = order.get('section');
+    if (!Array.isArray(sections)) {
+        sections = [sections];
+    };
+    sections.map((section) => {
         let unsorted = section.get('unsorted');
         if (unsorted && !Array.isArray(unsorted)) {
             unsorted = [unsorted];
@@ -698,6 +740,7 @@ export const renderSpanner = (spanner) => {
     return ""; 
 }
 
+// this is a way to keep track of spanners and other things that needs to be retrieved in t
 class OnceConsumer {
     constructor (type = 'fifo') {
         this.data = {};
@@ -755,12 +798,91 @@ export const renderDynamic = (dynamic) => {
     return ret;
 }
 
+export const parseTempo = (tempoEvt) => {
+    // this requires a bit of trickery
+    /*
+          <Tempo>
+            <tempo>1</tempo>
+            <followText>1</followText>
+            <eid>nZKNqFjlayM_cWyfGetlnSK</eid>
+            <text><sym>metNoteQuarterUp</sym><font face="Edwin"></font> = 60</text>
+            </Tempo>
+
+        
+                  <Tempo>
+            <tempo>1</tempo>
+            <followText>1</followText>
+            <eid>+13ij4Pf60O_vTAaptrxsfI</eid>
+            <minDistance>-999</minDistance>
+            <family>FreeSerif</family>
+            <bold>0</bold>
+            <offset x="-1.35348" y="-4.29607"/>
+            <text><b></b><sym>metNoteQuarterUp</sym><b><font face="FreeSerif"/> = 60
+
+
+</b></text>
+            </Tempo>
+    */
+    const tempo = tempoEvt.get('tempo'); 
+    const followText = tempoEvt.get('followText');
+    const text = tempoEvt.get('text'); // this is '= 60', or free text, such as with type aTempo, which we need to copy.
+    // text might also be an XmlWrapper, which means we need to do some digging to find what we need.
+    let tempoValue, tempoText;
+    if (text instanceof XmlWrapper) {
+        const data = text.data;
+        // Deep search through the XML data structure to find tempo value
+        
+        const searchForTempoValue = (obj) => {
+            if (typeof obj === 'string') {
+                const match = obj.match(/=[\s\S]?([0-9]+)/);
+                if (match) {
+                    return match[1];
+                }
+            }
+            if (obj && typeof obj === 'object') {
+                for (const key in obj) {
+                    const result = searchForTempoValue(obj[key]);
+                    if (result) return result;
+                }
+            }
+            return null;
+        };
+        tempoValue = searchForTempoValue(data);
+        if (tempoValue) {
+            tempoValue = parseInt(tempoValue, 10);
+        }
+    }
+    else {
+        tempoText = text;
+    }
+
+    const type = tempoEvt.get('type'); // this can be aTempo, or nothing
+    // const tempoValue = type? "": parseInt(text.split('=')[1].trim(), 10);
+    const tempoSymbol = type? "" : tempoEvt.get('text', true).get('sym');
+    const tempoSymbolValue = type? "": metronomeNoteSymbolMap[tempoSymbol];
+    if (!tempoSymbolValue && !type) {
+        console.warn('Unknown tempo symbol:', tempoSymbol);
+    }
+    return {
+        tempo,
+        followText,
+        tempoText,
+        tempoValue,
+        tempoSymbol,
+        tempoSymbolValue
+    };
+}
+
 
 export const renderMusicForStaff = (staff) => {
     const staffContents = staff.contents;
     let currentKeySig = null;
     let currentTimeSig = null;
     const isPercussion = staff.defaultClef === 'PERC';
+    const lyrics = [];
+    let currentTime = 0;
+    let currentTempo;
+    let lastLyric;
     const ret = staffContents.map((measure) => {
         // TODO: we need to do something about the transposition
         let measureText = "";
@@ -769,15 +891,20 @@ export const renderMusicForStaff = (staff) => {
             measureText += `\\partial ${durationMap[measure.len]}`;
         }
         const voices = measure.voice;
-        const parsedVoices = voices.map((voice) => {
+        const parsedVoices = voices.map((voice, voiceIdx) => {
             // we need to keep the fermata, as in Lilypond it should always follow the event it is attached to
             const voiceConsumer = new OnceConsumer('lifo');
+            
             return voice.map((evt) => {
                 switch (evt.name) {
+                    case 'Tempo': {	
+                        currentTempo = parseTempo(evt);
+                        break;
+                    }
                     case 'KeySig': {
                         if (!isPercussion) {
-                        currentKeySig = evt;
-                        return renderKeySig(evt);
+                            currentKeySig = evt;
+                            return renderKeySig(evt);
                         }
                     }
                     case 'TimeSig': {
@@ -785,6 +912,11 @@ export const renderMusicForStaff = (staff) => {
                         return parseTimeSig(evt);
                     }
                     case 'Rest': {
+                        // we want to do time tracking, so we need to know the duration of the rest
+                        // this needs to be done different. I convert it to whole bars now, but that might not be the best.
+                        // Preferrably I would convert the duration to a tick value, then from there I the lyrics offset is easy to convert to ms.
+                        const duration = getDurationFor(evt);
+                        currentTime += 4/parseInt(duration, 10); 
                         let renderedRest = parseRest(evt, currentTimeSig);
                         if (voiceConsumer.has('dynamic')) {
                             renderedRest = `${renderedRest}${voiceConsumer.get('dynamic')}`;
@@ -801,7 +933,25 @@ export const renderMusicForStaff = (staff) => {
                         return renderedRest;
                     }
                     case 'Chord': {
-                        let renderedChord = parseChord(evt, currentTimeSig, currentKeySig);
+                        const duration = 4/parseInt(getDurationFor(evt), 10);
+                        if (evt.get('Lyrics')) {
+                            // we have to be aware that the current note might be tied to the next note
+                            // and so the duration of the lyric is not the same as the current duration of this
+                            // note event.
+                            const lyricData = evt.get('Lyrics');
+                            const lyric = {
+                                voiceIdx: voiceIdx,
+                                start: currentTime,
+                                end: currentTime + duration,
+                                text: lyricData.get('text'),
+                                syllabic: lyricData.get('syllabic'),
+                                currentTempo,
+                            };
+                            lyrics.push(lyric);
+                            lastLyric = lyric;
+                        }
+                        currentTime += duration; 
+                        let renderedChord = parseChord(evt, currentTimeSig, currentKeySig, lastLyric);
                         if (voiceConsumer.has('dynamic')) {
                             renderedChord = `${renderedChord}${voiceConsumer.get('dynamic')}`;
                         }
@@ -851,15 +1001,17 @@ export const renderMusicForStaff = (staff) => {
         }
         return `${measureText} ${parsedVoices[0]}`;
     });
-    return ret;
+    return { lyrics, music: ret };
 }
 
 const renderStaff = (staff) => {
+    const { lyrics, music } = renderMusicForStaff(staff);
     const ret = {
         id: staff.id,
         defaultClef: staff.defaultClef,
         isStaffVisible: staff.isStaffVisible? staff.isStaffVisible[0] : null,
-        measures: renderMusicForStaff(staff)
+        measures: music,
+        lyrics,
     };
     return ret;
 }
@@ -953,7 +1105,8 @@ const renderPart = (part) => {
     const ret = {
         musicData: {},
         scoreData: [], // in the score, the order does matter
-        partData: {}
+        partData: {},
+        lyricData: [],
     };
     if (part.staffs.length > 1) {
         // we need to render multiple staffs
@@ -976,6 +1129,7 @@ const renderPart = (part) => {
             tmpScoreData += `    \\${partDataName}\n`; 
             if (transposition) tmpScoreData += `    }\n`;
             tmpScoreData += `}\n`;
+            ret.lyricData.push(staff.lyrics);
         });
         tmpScoreData += ">>\n";
         ret.scoreData.push(tmpScoreData);
@@ -1001,6 +1155,7 @@ const renderPart = (part) => {
         if (transposition) tmpPartData += `    }\n`;
         tmpPartData += `}\n`;
         ret.partData[partName] = tmpPartData;
+        ret.lyricData.push(renderedStaff.lyrics);
     }
     return ret;
 }
@@ -1012,7 +1167,7 @@ export const renderLilypond = (partsInfo, metaInfo, options = {}) => {
     const data = {
         musicData: {},
         scoreData: [], // in the score, the order does matter
-        partData: {}
+        partData: {},
     };
     const musicKeyCount = {};
     const partKeyCount = {};
@@ -1172,4 +1327,63 @@ export const convertMSCX2LY = (data, options = {}) => {
     // we will go throught the parts, section by section, and generate the lilypond structure and data
     const lilypondData = renderLilypond(partsInfo, metaInfo, options);
     return lilypondData;
+}
+
+export const renderLyricTimings = (data ) => {
+    const Score = data.get('Score');
+    const orderInfo = readOrderInfo(Score.get('Order'));
+    // step 2: Staff
+    const staffInfo = readStaffInfo(Score.get('Staff'));
+    // step 3: the parts
+    const partsInfo = readPartsInfo(Score.get('Part'), orderInfo, staffInfo);
+    // step 4: the meta info
+    // const metaInfo = parseMetaTag(Score.get('metaTag'));
+    const ret = {};
+    partsInfo.forEach((partInfo) => {
+        const curPart = ret[partInfo.trackName] = [];
+        if (partInfo.isSection) {
+            const parts = partInfo.parts.map((part, idx) => {
+                const renderedPart = renderPart(part, data);
+                renderedPart.lyricData.forEach((lyricData) => {
+                    lyricData.forEach(lyric => {
+                        const beatPerSecond = lyric.currentTempo.tempoValue / 60;
+                        // this is the note value, such as 4, 2 or 1.
+                        // we need to compare the start (which is calculated in quarters) against the 
+                        // tempo symbol value.
+                        const factor = 4 / lyric.currentTempo.tempoSymbolValue;
+                        lyric.startMs = lyric.start * factor * beatPerSecond * 1000;
+                        lyric.endMs = lyric.end * factor * beatPerSecond * 1000;
+                        // lyric.endMs = lyric.end * ticksPerQuarter;
+                    });
+                });
+                // console.log(`lyrics for part ${idx}:`, renderedPart.lyricData);
+                curPart.push(...renderedPart.lyricData);
+                return renderedPart;
+            })
+            // take the lyrics timing
+        }
+        else {
+            // not a section, but a part
+            const part = renderPart(partInfo, data);
+            part.lyricData.forEach((lyricData) => {
+                lyricData.forEach(lyric => {
+                    const beatPerSecond = lyric.currentTempo.tempoValue / 60;
+                    // this is the note value, such as 4, 2 or 1.
+                    // we need to compare the start (which is calculated in quarters) against the 
+                    // tempo symbol value.
+                    const factor = 4 / lyric.currentTempo.tempoSymbolValue;
+                    lyric.startMs = lyric.start * factor * beatPerSecond * 1000;
+                    lyric.endMs = lyric.end * factor * beatPerSecond * 1000;
+                    // lyric.endMs = lyric.end * ticksPerQuarter;
+                });
+            });
+            curPart.push(...part.lyricData);
+
+            // console.log('lyrics:', part.lyricData);
+            // what needs to be done:
+            // - match a part name
+            // - convert to ms from ticks
+        }   
+    });
+    return ret;
 }
