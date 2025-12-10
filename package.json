@@ -4,7 +4,7 @@
   "description": "Tool to render lilypond code from a MuseScore save file",
   "main": "index.js",
   "bin": {
-    "mscx2ly": "bin/mscx2ly"
+    "mscx2ly": "bin/mscx2ly.js"
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -29,5 +29,8 @@
     "adm-zip": "^0.5.16",
     "commander": "^12.1.0",
     "xml2js": "^0.6.2"
+  },
+  "devDependencies": {
+    "ava": "^6.2.0"
   }
 }
