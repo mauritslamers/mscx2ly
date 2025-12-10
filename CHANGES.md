@@ -1,5 +1,6 @@
 - 0.1.11
     - fix script use because of ES6 modules use
+    - add some basic lyrics support
 - 0.1.10
     - fix missing clef in parts
     - special barline support (without repeat)
