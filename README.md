@@ -1,7 +1,7 @@
 # MSCX2LY
 
 mscx2ly is a simple converter to extract a subset of musical information from
-an uncompressed MuseScore project file.
+a MuseScore project file.
 
 The tool reads the MuseScore project file, extracts the parts and tries to
 reassemble the sections and staffs as well as possible.
