@@ -18,6 +18,7 @@
     "musescore"
   ],
   "type": "module",
+  "engines": { "node": ">=18" },
   "typings": "./typings/mscx2ly.d.ts",
   "author": "Maurits Lamers",
   "license": "MIT",
