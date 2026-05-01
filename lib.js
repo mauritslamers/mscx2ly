@@ -653,16 +653,19 @@ export const readStaffInfo = (staffs) => {
             id: staff.get('id'),
             Measure: staff.get('Measure').map((measure) => {
                 let voices = measure.get('voice');
-                if (!Array.isArray(voices)) {
+                if (!voices) {
+                    voices = [];
+                } else if (!Array.isArray(voices)) {
                     voices = [voices];
                 }
                 return {
                     irregular: measure.get('irregular'),
                     len: measure.get('len'),
                     voice: voices.map((voice) => {
+                        if (!voice) return [];
                         // the purpose here is a filter to only get the relevant information
                         // now order becomes important, so we use the children instead.
-                        return voice.children.filter((child) => {
+                        return (voice.children || []).filter((child) => {
                             return [
                                 'KeySig', 
                                 'TimeSig', 
