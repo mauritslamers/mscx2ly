@@ -658,11 +658,11 @@ export const readStaffInfo = (staffs) => {
                 } else if (!Array.isArray(voices)) {
                     voices = [voices];
                 }
+                voices = voices.filter(Boolean);
                 return {
                     irregular: measure.get('irregular'),
                     len: measure.get('len'),
                     voice: voices.map((voice) => {
-                        if (!voice) return [];
                         // the purpose here is a filter to only get the relevant information
                         // now order becomes important, so we use the children instead.
                         return (voice.children || []).filter((child) => {
@@ -1000,7 +1000,14 @@ export const renderMusicForStaff = (staff) => {
             }).join(' ');
         });
         if (parsedVoices.length === 0) {
-            return measureText || '';
+            // Emit a full-measure spacer rest so bar checks remain valid in LilyPond.
+            // Use the current time signature if known, otherwise default to a whole.
+            if (currentTimeSig) {
+                const n = currentTimeSig.get('sigN');
+                const d = currentTimeSig.get('sigD');
+                return `${measureText} s${d}*${n}`;
+            }
+            return `${measureText} s1`;
         }
         if (parsedVoices.length > 1) {
             return `${measureText} << { ${parsedVoices.join(' } \\\\ { ')} } >>`;
