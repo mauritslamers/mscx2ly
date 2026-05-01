@@ -999,6 +999,9 @@ export const renderMusicForStaff = (staff) => {
                 }
             }).join(' ');
         });
+        if (parsedVoices.length === 0) {
+            return measureText || '';
+        }
         if (parsedVoices.length > 1) {
             return `${measureText} << { ${parsedVoices.join(' } \\\\ { ')} } >>`;
         }
