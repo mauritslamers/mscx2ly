@@ -472,7 +472,7 @@ export const readPartInfo = (part, staffInfo) => {
             return staffdata.id === staff.get('id');
         });
         if (!staffContents) {
-            console.warn(`[mscx2ly] Staff id "${staff.get('id')}" not found in score staves, skipping`);
+            console.warn(`[mscx2ly] Staff id "${staff.get('id')}" not found in score staves; returning staff with empty contents`);
         }
         let defaultConcertClef = staff.get('defaultConcertClef')? staff.get('defaultConcertClef') : null;
         let defaultClef = staff.get('defaultClef')? staff.get('defaultClef') : defaultConcertClef;
