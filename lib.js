@@ -1004,14 +1004,30 @@ export const renderMusicForStaff = (staff) => {
         // spaces/empty blocks in the LilyPond output.
         const nonEmptyVoices = parsedVoices.filter(v => v && v.trim());
         if (nonEmptyVoices.length === 0) {
-            // Emit a full-measure spacer rest so bar checks remain valid in LilyPond.
-            // Use the current time signature if known, otherwise default to a whole.
-            if (currentTimeSig) {
-                const n = currentTimeSig.get('sigN');
-                const d = currentTimeSig.get('sigD');
-                return `${measureText} s${d}*${n}`;
+            // Emit a spacer rest so bar checks remain valid in LilyPond and
+            // currentTime stays aligned for subsequent lyric timing.
+            let spacer;
+            if (measure.len) {
+                // Pickup (partial) measure: spacer must match the partial duration.
+                const partialDur = durationMap[measure.len];
+                const partialQuarters = partialDur ? 4 / parseInt(partialDur, 10) : 0;
+                currentTime += partialQuarters;
+                spacer = partialDur ? `s${partialDur}` : 's1';
+            } else if (currentTimeSig) {
+                const n = parseInt(currentTimeSig.get('sigN'), 10);
+                const d = parseInt(currentTimeSig.get('sigD'), 10);
+                if (n && d) {
+                    currentTime += 4 * n / d;
+                    spacer = `s${d}*${n}`;
+                } else {
+                    currentTime += 4;
+                    spacer = 's1';
+                }
+            } else {
+                currentTime += 4;
+                spacer = 's1';
             }
-            return `${measureText} s1`;
+            return `${measureText} ${spacer}`;
         }
         if (nonEmptyVoices.length > 1) {
             return `${measureText} << { ${nonEmptyVoices.join(' } \\\\ { ')} } >>`;
