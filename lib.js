@@ -132,7 +132,8 @@ export const parseRest = (rest, timeSig) => {
 
     const duration = durationMap[restDuration];
     if (!duration) {
-        throw new Error(`Unknown duration: ${restDuration}`);
+        console.warn(`[mscx2ly] Unknown rest duration: "${restDuration}", substituting quarter rest`);
+        return 'r4';
     }
     if (rest.get('durationType') === "measure") {
         return `R${duration}`;
@@ -277,6 +278,10 @@ const parseNote = (note, keySig) => {
  */
 export const parseChord = (chord, timeSig, keySig, lyric) => {
     const dur = durationMap[chord.get('durationType')];
+    if (!dur) {
+        console.warn(`[mscx2ly] Unknown chord duration type: "${chord.get('durationType')}", skipping chord`);
+        return '';
+    }
     const dots = chord.get('dots')? parseInt(chord.get('dots'), 10) : 0;
     const duration = dur + '.'.repeat(dots);
 
@@ -861,7 +866,8 @@ export const parseTempo = (tempoEvt) => {
 
     const type = tempoEvt.get('type'); // this can be aTempo, or nothing
     // const tempoValue = type? "": parseInt(text.split('=')[1].trim(), 10);
-    const tempoSymbol = type? "" : tempoEvt.get('text', true).get('sym');
+    const tempoTextNode = type ? null : tempoEvt.get('text', true);
+    const tempoSymbol = tempoTextNode ? tempoTextNode.get('sym') : "";
     const tempoSymbolValue = type? "": metronomeNoteSymbolMap[tempoSymbol];
     if (!tempoSymbolValue && !type) {
         console.warn('Unknown tempo symbol:', tempoSymbol);
@@ -909,6 +915,7 @@ export const renderMusicForStaff = (staff) => {
                             currentKeySig = evt;
                             return renderKeySig(evt);
                         }
+                        break;
                     }
                     case 'TimeSig': {
                         currentTimeSig = evt;
@@ -916,10 +923,16 @@ export const renderMusicForStaff = (staff) => {
                     }
                     case 'Rest': {
                         // we want to do time tracking, so we need to know the duration of the rest
-                        // this needs to be done different. I convert it to whole bars now, but that might not be the best.
-                        // Preferrably I would convert the duration to a tick value, then from there I the lyrics offset is easy to convert to ms.
-                        const duration = getDurationFor(evt);
-                        currentTime += 4/parseInt(duration, 10); 
+                        // Parse the raw MuseScore ratio (e.g. "3/8") directly to avoid
+                        // parseInt dropping dots from dotted LilyPond duration strings.
+                        const restRaw = evt.get('duration') || evt.get('durationType');
+                        const restParts = restRaw && restRaw.includes('/') ? restRaw.split('/').map(Number) : null;
+                        if (restParts) {
+                            currentTime += 4 * restParts[0] / restParts[1];
+                        } else {
+                            const restDur = getDurationFor(evt);
+                            if (restDur) currentTime += 4 / parseInt(restDur, 10);
+                        }
                         let renderedRest = parseRest(evt, currentTimeSig);
                         if (voiceConsumer.has('dynamic')) {
                             renderedRest = `${renderedRest}${voiceConsumer.get('dynamic')}`;
@@ -936,7 +949,11 @@ export const renderMusicForStaff = (staff) => {
                         return renderedRest;
                     }
                     case 'Chord': {
-                        const duration = 4/parseInt(getDurationFor(evt), 10);
+                        // Parse raw MuseScore ratio directly to avoid parseInt dropping dots.
+                        const chordRaw = evt.get('duration') || evt.get('durationType');
+                        const chordParts = chordRaw && chordRaw.includes('/') ? chordRaw.split('/').map(Number) : null;
+                        const duration = chordParts ? 4 * chordParts[0] / chordParts[1]
+                            : (() => { const d = getDurationFor(evt); return d ? 4 / parseInt(d, 10) : 0; })();
                         if (evt.get('Lyrics')) {
                             // we have to be aware that the current note might be tied to the next note
                             // and so the duration of the lyric is not the same as the current duration of this
@@ -1009,8 +1026,11 @@ export const renderMusicForStaff = (staff) => {
             let spacer;
             if (measure.len) {
                 // Pickup (partial) measure: spacer must match the partial duration.
+                // Derive currentTime from the raw ratio (e.g. "3/8") to correctly
+                // handle dotted durations — parseInt on the LilyPond string "4." drops the dot.
                 const partialDur = durationMap[measure.len];
-                const partialQuarters = partialDur ? 4 / parseInt(partialDur, 10) : 0;
+                const [num, den] = measure.len.split('/').map(Number);
+                const partialQuarters = (num && den) ? 4 * num / den : 0;
                 currentTime += partialQuarters;
                 spacer = partialDur ? `s${partialDur}` : 's1';
             } else if (currentTimeSig) {
@@ -1082,8 +1102,8 @@ const calculateTransposition = (part) => {
     // in case of -1, -3 it means c to dis 
     // in case of -2, -3 it means c to es
     const isUp = diatonic > 0; 
-    const stepNames = isUp? diatonics.reverse() : diatonics;
-    const chromaticValues = isUp > 0? chromatics.reverse() : chromatics;
+    const stepNames = isUp ? [...diatonics].reverse() : diatonics;
+    const chromaticValues = isUp ? [...chromatics].reverse() : chromatics;
     // now the process is identical, walk the diatonic steps, calculate the chromatic value
     let totalChromatic = 0;
     let endName = stepNames[Math.abs(diatonic)];
@@ -1422,14 +1442,15 @@ export const renderLyricTimings = (data ) => {
                 const renderedPart = renderPart(part, data);
                 renderedPart.lyricData.forEach((lyricData) => {
                     lyricData.forEach(lyric => {
+                        if (!lyric.currentTempo || !lyric.currentTempo.tempoValue || !lyric.currentTempo.tempoSymbolValue) {
+                            lyric.startMs = null;
+                            lyric.endMs = null;
+                            return;
+                        }
                         const beatPerSecond = lyric.currentTempo.tempoValue / 60;
-                        // this is the note value, such as 4, 2 or 1.
-                        // we need to compare the start (which is calculated in quarters) against the 
-                        // tempo symbol value.
                         const factor = 4 / lyric.currentTempo.tempoSymbolValue;
                         lyric.startMs = lyric.start * factor * beatPerSecond * 1000;
                         lyric.endMs = lyric.end * factor * beatPerSecond * 1000;
-                        // lyric.endMs = lyric.end * ticksPerQuarter;
                     });
                 });
                 // console.log(`lyrics for part ${idx}:`, renderedPart.lyricData);
@@ -1443,14 +1464,15 @@ export const renderLyricTimings = (data ) => {
             const part = renderPart(partInfo, data);
             part.lyricData.forEach((lyricData) => {
                 lyricData.forEach(lyric => {
+                    if (!lyric.currentTempo || !lyric.currentTempo.tempoValue || !lyric.currentTempo.tempoSymbolValue) {
+                        lyric.startMs = null;
+                        lyric.endMs = null;
+                        return;
+                    }
                     const beatPerSecond = lyric.currentTempo.tempoValue / 60;
-                    // this is the note value, such as 4, 2 or 1.
-                    // we need to compare the start (which is calculated in quarters) against the 
-                    // tempo symbol value.
                     const factor = 4 / lyric.currentTempo.tempoSymbolValue;
                     lyric.startMs = lyric.start * factor * beatPerSecond * 1000;
                     lyric.endMs = lyric.end * factor * beatPerSecond * 1000;
-                    // lyric.endMs = lyric.end * ticksPerQuarter;
                 });
             });
             curPart.push(...part.lyricData);
