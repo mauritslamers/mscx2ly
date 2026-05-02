@@ -999,7 +999,11 @@ export const renderMusicForStaff = (staff) => {
                 }
             }).join(' ');
         });
-        if (parsedVoices.length === 0) {
+        // A voice with no supported children renders to an empty string.
+        // Filter those out so they don't count as real voices or produce stray
+        // spaces/empty blocks in the LilyPond output.
+        const nonEmptyVoices = parsedVoices.filter(v => v && v.trim());
+        if (nonEmptyVoices.length === 0) {
             // Emit a full-measure spacer rest so bar checks remain valid in LilyPond.
             // Use the current time signature if known, otherwise default to a whole.
             if (currentTimeSig) {
@@ -1009,10 +1013,10 @@ export const renderMusicForStaff = (staff) => {
             }
             return `${measureText} s1`;
         }
-        if (parsedVoices.length > 1) {
-            return `${measureText} << { ${parsedVoices.join(' } \\\\ { ')} } >>`;
+        if (nonEmptyVoices.length > 1) {
+            return `${measureText} << { ${nonEmptyVoices.join(' } \\\\ { ')} } >>`;
         }
-        return `${measureText} ${parsedVoices[0]}`;
+        return `${measureText} ${nonEmptyVoices[0]}`;
     });
     return { lyrics, music: ret };
 }
