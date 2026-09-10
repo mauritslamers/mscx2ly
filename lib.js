@@ -2,6 +2,7 @@ import { XmlWrapper } from "./xml_wrapper.js";
 import { getStaffId, detectVersion, LATEST_FORMAT_VERSION } from "./compat.js";
 import { analyzeVoicing } from "./render/voicing.js";
 import { annotateTuplets } from "./render/tuplets.js";
+import { findVoltaStart, mergeRepeatMarkers, analyzeRepeats, applyRepeats } from "./render/repeats.js";
 
 /** 
  * @param {MetaTag} metaTag 
@@ -694,31 +695,39 @@ export const readStaffInfo = (staffs = []) => {
                     voices = [voices];
                 }
                 voices = voices.filter(Boolean);
+                const filteredVoices = voices.map((voice) => {
+                    // the purpose here is a filter to only get the relevant information
+                    // now order becomes important, so we use the children instead.
+                    return (voice.children || []).filter((child) => {
+                        return [
+                            'KeySig', 
+                            'TimeSig', 
+                            'Tempo', 
+                            'Rest', 
+                            'Dynamic', 
+                            'Spanner', 
+                            'Chord', 
+                            'BarLine', 
+                            'VBox', 
+                            'Clef',
+                            'Fermata',
+                            'PlayTechAnnotation',
+                            'Tuplet',
+                            'endTuplet'
+                        ].includes(child.name);
+                    });
+                });
                 return {
+                    // startRepeat/endRepeat/Volta live on <Measure>, not in the
+                    // voice event stream (see tickets/B01-repeat-barlines-not-converted.md),
+                    // and MuseScore only stores them on one staff per system —
+                    // findVoltaStart/analyzeRepeats merge these across staves.
+                    startRepeat: !!measure.get('startRepeat'),
+                    endRepeat: measure.get('endRepeat'),
+                    voltaStart: findVoltaStart(filteredVoices),
                     irregular: measure.get('irregular'),
                     len: measure.get('len'),
-                    voice: voices.map((voice) => {
-                        // the purpose here is a filter to only get the relevant information
-                        // now order becomes important, so we use the children instead.
-                        return (voice.children || []).filter((child) => {
-                            return [
-                                'KeySig', 
-                                'TimeSig', 
-                                'Tempo', 
-                                'Rest', 
-                                'Dynamic', 
-                                'Spanner', 
-                                'Chord', 
-                                'BarLine', 
-                                'VBox', 
-                                'Clef',
-                                'Fermata',
-                                'PlayTechAnnotation',
-                                'Tuplet',
-                                'endTuplet'
-                            ].includes(child.name);
-                        });
-                    })
+                    voice: filteredVoices
                 }
             })
         }
@@ -773,6 +782,10 @@ export const renderSpanner = (spanner) => {
     }
     if (type === 'HairPin') {
         return renderHairPin(spanner);
+    }
+    else if (type === 'Volta') {
+        // handled structurally as \repeat volta/\alternative, see render/repeats.js
+        return "";
     }
     else {
         console.warn('[mscx2ly] Spanner type not implemented:', type);
@@ -1060,7 +1073,7 @@ export function getEventHandlers(formatVersion) {
     return entry ? entry.handlers : baseEventHandlers;
 }
 
-export const renderMusicForStaff = (staff, formatVersion = LATEST_FORMAT_VERSION, showBarNumbers = false) => {
+export const renderMusicForStaff = (staff, formatVersion = LATEST_FORMAT_VERSION, showBarNumbers = false, repeatRegions = []) => {
     const staffContents = staff.contents;
     const eventHandlers = getEventHandlers(formatVersion);
     const ctx = {
@@ -1152,11 +1165,13 @@ export const renderMusicForStaff = (staff, formatVersion = LATEST_FORMAT_VERSION
         const barComment = showBarNumbers ? ` % ${barNumber}` : '';
         return `${measureText} ${nonEmptyVoices[0]}${barComment}`;
     });
-    return { lyrics: ctx.lyrics, music: ret };
+    // Applied identically for every staff regardless of its own content (see
+    // render/repeats.js) since the repeat barline spans the whole system.
+    return { lyrics: ctx.lyrics, music: applyRepeats(ret, repeatRegions) };
 }
 
-const renderStaff = (staff, formatVersion, showBarNumbers = false) => {
-    const { lyrics, music } = renderMusicForStaff(staff, formatVersion, showBarNumbers);
+const renderStaff = (staff, formatVersion, showBarNumbers = false, repeatRegions = []) => {
+    const { lyrics, music } = renderMusicForStaff(staff, formatVersion, showBarNumbers, repeatRegions);
     const ret = {
         id: staff.id,
         defaultClef: staff.defaultClef,
@@ -1267,7 +1282,7 @@ const renderLyrics = (lyrics) => {
 }
 
 
-const renderPart = (part, formatVersion, showBarNumbers = false) => {
+const renderPart = (part, formatVersion, showBarNumbers = false, repeatRegions = []) => {
     const partName = part.trackName;
     const longName = part.instrument[0].longName;
     const shortName = part.instrument[0].shortName;
@@ -1281,7 +1296,7 @@ const renderPart = (part, formatVersion, showBarNumbers = false) => {
     if (part.staffs.length > 1) {
         // we need to render multiple staffs
         // we need to make a macro for the contents of each staff
-        const renderedStaffs = part.staffs.map((staff) => renderStaff(staff, formatVersion, showBarNumbers));
+        const renderedStaffs = part.staffs.map((staff) => renderStaff(staff, formatVersion, showBarNumbers, repeatRegions));
         // lets assume a piano for now
         // this means one staff is treble and one is bass
         // we need to abstract the data for the staffs first
@@ -1306,7 +1321,7 @@ const renderPart = (part, formatVersion, showBarNumbers = false) => {
         ret.partData[partName] = tmpScoreData; 
     }
     else {
-        const renderedStaff = renderStaff(part.staffs[0], formatVersion, showBarNumbers);
+        const renderedStaff = renderStaff(part.staffs[0], formatVersion, showBarNumbers, repeatRegions);
         const staffHasLyrics = renderedStaff.lyrics && renderedStaff.lyrics.length;
         const partDataName = createValidPartName(partName);
         ret.musicData[partDataName] = renderedStaff.measures;
@@ -1358,7 +1373,7 @@ const renderPart = (part, formatVersion, showBarNumbers = false) => {
 }
 
 
-export const renderLilypond = (partsInfo, metaInfo, options = {}, formatVersion = LATEST_FORMAT_VERSION) => {
+export const renderLilypond = (partsInfo, metaInfo, options = {}, formatVersion = LATEST_FORMAT_VERSION, repeatRegions = []) => {
     // there are two parts we are going to render
     // the parts music library, the score and possibly the parts (which can be part of the same file)
     const data = {
@@ -1371,7 +1386,7 @@ export const renderLilypond = (partsInfo, metaInfo, options = {}, formatVersion 
     partsInfo.forEach((partInfo) => {
         if (partInfo.isSection) {
             const parts = partInfo.parts.map((part) => {
-                return renderPart(part, formatVersion, options.showBarNumbers);
+                return renderPart(part, formatVersion, options.showBarNumbers, repeatRegions);
             });
             // we can now copy the musicdata to the data.musicData
             let ret = "  \\new StaffGroup <<\n";
@@ -1391,7 +1406,7 @@ export const renderLilypond = (partsInfo, metaInfo, options = {}, formatVersion 
         }
         else {
             // not a section, but a part
-            const part = renderPart(partInfo, formatVersion, options.showBarNumbers);
+            const part = renderPart(partInfo, formatVersion, options.showBarNumbers, repeatRegions);
             // we can now copy the musicdata to the data.musicData
             
             Object.keys(part.musicData).forEach((key) => {
@@ -1515,6 +1530,10 @@ export const convertMSCX2LY = (data, options = {}) => {
     const orderInfo = readOrderInfo(Score.get('Order'));
     // step 2: Staff
     const staffInfo = readStaffInfo(Score.get('Staff'));
+    // repeat/volta markers may live on only one staff of a system (see
+    // render/repeats.js), so they're merged across all staves once, up front,
+    // and applied identically to every staff during rendering.
+    const repeatRegions = analyzeRepeats(mergeRepeatMarkers(staffInfo.filter(Boolean).map((staff) => staff.Measure)));
     // step 3: the parts
     const partsInfo = readPartsInfo(Score.get('Part'), orderInfo, staffInfo);
     // step 4: the meta info
@@ -1523,7 +1542,7 @@ export const convertMSCX2LY = (data, options = {}) => {
     // with the parts info we have the parts in the order they are in the score
     // now we can start generating the lilypond structure
     // we will go throught the parts, section by section, and generate the lilypond structure and data
-    const lilypondData = renderLilypond(partsInfo, metaInfo, options, formatVersion.value);
+    const lilypondData = renderLilypond(partsInfo, metaInfo, options, formatVersion.value, repeatRegions);
     return lilypondData;
 }
 

@@ -3,28 +3,7 @@ import fs from 'fs';
 import xml2js from 'xml2js';
 import { XmlWrapper } from './xml_wrapper.js';
 import admZip from 'adm-zip';
-
-function detectVersion (data) {
-    const createdWith = data.get('programVersion');
-    const [ programMajor, programMinor, programPatch] = createdWith.split('.');
-    const formatVersion = data.get('version');
-    const [ formatMajor, formatMinor] = formatVersion.split('.');
-    return { 
-        createdWith: {
-            major: parseInt(programMajor, 10),
-            minor: parseInt(programMinor, 10),
-            patch: parseInt(programPatch, 10),
-            text: createdWith
-        }, 
-        formatVersion: {
-            major: parseInt(formatMajor, 10),
-            minor: parseInt(formatMinor, 10),
-            text: formatVersion
-        }
-    };
-}
-
-
+import { detectVersion } from './compat.js';
 
 export const mscx2ly = async ({
     sourceFile,
@@ -121,7 +100,6 @@ export const mscx2ly = async ({
         process.exit(0);
     }
     catch (e) {
-        console.log(e);
         console.error('Could not write output files. Exiting.');
         process.exit(1);
     }
