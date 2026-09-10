@@ -7,7 +7,8 @@
     "mscx2ly": "bin/mscx2ly.js"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "ava",
+    "compare-pdf": "node scripts/compare-pdf.js"
   },
   "repository": {
     "type": "git",
