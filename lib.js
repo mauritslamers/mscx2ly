@@ -139,6 +139,10 @@ export const parseRest = (rest, timeSig) => {
     // now we need to convert the ratio to a lilypond duration
     const restDuration = rest.get('duration') ? rest.get('duration') : rest.get('durationType');
     const isMeasureRest = rest.get('durationType') === "measure";
+    // dots are only ever seen alongside durationType (e.g. "half" + dots="1"),
+    // never alongside a duration fraction (which already bakes the dot into
+    // durationMap, e.g. "3/8" -> "4."), so this can't double up a dot.
+    const dots = rest.get('dots') ? parseInt(rest.get('dots'), 10) : 0;
 
     const duration = durationMap[restDuration];
     if (!duration) {
@@ -155,10 +159,10 @@ export const parseRest = (rest, timeSig) => {
         return 'r4';
     }
     if (isMeasureRest) {
-        return `R${duration}`;
+        return `R${duration}${'.'.repeat(dots)}`;
     }
     else {
-        return `r${duration}`;
+        return `r${duration}${'.'.repeat(dots)}`;
     }
 }
 
@@ -712,6 +716,7 @@ export const readStaffInfo = (staffs = []) => {
                             'Clef',
                             'Fermata',
                             'PlayTechAnnotation',
+                            'RehearsalMark',
                             'Tuplet',
                             'endTuplet'
                         ].includes(child.name);
@@ -755,6 +760,10 @@ const fermatas = {
 export const renderFermata = (fermata) => {
     const type = fermata.get('subtype');
     return fermatas[type] || "";
+}
+
+export const renderRehearsalMark = (mark) => {
+    return `\\mark \\markup { \\box "${mark.get('text')}" }`;
 }
 
 export const renderHairPin = (spanner) => {
@@ -878,13 +887,15 @@ export const parseTempo = (tempoEvt) => {
     */
     const tempo = tempoEvt.get('tempo'); 
     const followText = tempoEvt.get('followText');
-    const text = tempoEvt.get('text'); // this is '= 60', or free text, such as with type aTempo, which we need to copy.
-    // text might also be an XmlWrapper, which means we need to do some digging to find what we need.
+    const type = tempoEvt.get('type'); // this can be aTempo, or nothing
+    // forceChild=true so a mixed-content <text> (metronome symbol + trailing
+    // "= 80") isn't collapsed to just its trailing text by XmlWrapper's
+    // isText shortcut, which fires whenever *any* direct text is present,
+    // even alongside child elements like <sym>.
+    const textNode = tempoEvt.get('text', true);
     let tempoValue, tempoText;
-    if (text instanceof XmlWrapper) {
-        const data = text.data;
+    if (textNode && textNode.hasChildren) {
         // Deep search through the XML data structure to find tempo value
-        
         const searchForTempoValue = (obj) => {
             if (typeof obj === 'string') {
                 const match = obj.match(/=[\s\S]?([0-9]+)/);
@@ -900,19 +911,16 @@ export const parseTempo = (tempoEvt) => {
             }
             return null;
         };
-        tempoValue = searchForTempoValue(data);
+        tempoValue = searchForTempoValue(textNode.data);
         if (tempoValue) {
             tempoValue = parseInt(tempoValue, 10);
         }
     }
-    else {
-        tempoText = text;
+    else if (textNode) {
+        tempoText = textNode.text;
     }
 
-    const type = tempoEvt.get('type'); // this can be aTempo, or nothing
-    // const tempoValue = type? "": parseInt(text.split('=')[1].trim(), 10);
-    const tempoTextNode = type ? null : tempoEvt.get('text', true);
-    const tempoSymbol = tempoTextNode ? tempoTextNode.get('sym') : "";
+    const tempoSymbol = (!type && textNode && textNode.hasChildren) ? textNode.get('sym') : "";
     const tempoSymbolValue = type? "": metronomeNoteSymbolMap[tempoSymbol];
     if (!tempoSymbolValue && !type) {
         console.warn('Unknown tempo symbol:', tempoSymbol);
@@ -927,6 +935,17 @@ export const parseTempo = (tempoEvt) => {
     };
 }
 
+export const renderTempo = (tempoInfo) => {
+    // free text (e.g. "A Tempo", from a <Tempo type="aTempo">) with no metronome mark
+    if (tempoInfo.tempoText) {
+        return `\\tempo "${tempoInfo.tempoText}"`;
+    }
+    if (tempoInfo.tempoSymbolValue && tempoInfo.tempoValue) {
+        return `\\tempo ${tempoInfo.tempoSymbolValue} = ${tempoInfo.tempoValue}`;
+    }
+    return '';
+}
+
 
 // Voice-event handlers. Each takes (evt, ctx), may mutate ctx, and returns the
 // LilyPond text for that event (or undefined, matching a switch case that
@@ -934,6 +953,7 @@ export const parseTempo = (tempoEvt) => {
 
 function handleTempo(evt, ctx) {
     ctx.currentTempo = parseTempo(evt);
+    return renderTempo(ctx.currentTempo);
 }
 
 function handleKeySig(evt, ctx) {
@@ -966,7 +986,13 @@ function handleRest(evt, ctx) {
         ctx.currentTime += 4 * restParts[0] / restParts[1] * tupletScale;
     } else {
         const restDur = getDurationFor(evt);
-        if (restDur) ctx.currentTime += 4 / parseInt(restDur, 10) * tupletScale;
+        if (restDur) {
+            // durationType-based rests (no duration fraction) carry dots
+            // separately, e.g. durationType="half" dots="1" for a dotted half.
+            const dots = evt.get('dots') ? parseInt(evt.get('dots'), 10) : 0;
+            const dotMultiplier = 2 - Math.pow(2, -dots);
+            ctx.currentTime += 4 / parseInt(restDur, 10) * dotMultiplier * tupletScale;
+        }
     }
     const renderedRest = parseRest(evt, ctx.currentTimeSig);
     return applyPendingModifiers(renderedRest, ctx.voiceConsumer);
@@ -1021,6 +1047,13 @@ function handleFermata(evt, ctx) {
     ctx.voiceConsumer.set('fermata', renderFermata(evt));
 }
 
+// Rendered as its own token (like Clef/TimeSig), not a postfix modifier on
+// voiceConsumer: \mark isn't attachable to a note the way ^\markup is, it
+// must appear as its own music-event ahead of the note it aligns with.
+function handleRehearsalMark(evt) {
+    return renderRehearsalMark(evt);
+}
+
 function handlePlayTechAnnotation(evt, ctx) {
     const text = `^\\markup { \\italic ${evt.get('text')} }`;
     ctx.voiceConsumer.set('text', text);
@@ -1046,6 +1079,7 @@ const baseEventHandlers = {
     BarLine: handleBarLine,
     Fermata: handleFermata,
     PlayTechAnnotation: handlePlayTechAnnotation,
+    RehearsalMark: handleRehearsalMark,
     Spanner: handleSpanner,
     Dynamic: handleDynamic,
 };
