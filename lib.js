@@ -439,6 +439,17 @@ export function renderBarLine(barLine) {
                 // this is a longer version of the one above, Lilypond doesn't seem to have this by default
                 str = ","; // return the same as the small
             }
+            else if (fromOffset === 2 && toOffset === -2) {
+                // divisio minima (chant comma), positive-offset variant of the -2/-2 case above
+                str = ",";
+            }
+            else if (fromOffset === 1 && toOffset === -1) {
+                // divisio maior — a bigger pause than divisio minima. LilyPond has no
+                // dedicated \bar glyph for this (real Gregorian notation uses
+                // \caesura \shortfermata, a note-attached event, not a barline token);
+                // reusing ',' as it is almost identical to divisio minima effectively.
+                str = ",";
+            }
             break;
         }
     }       
