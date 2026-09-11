@@ -3,6 +3,7 @@ import { getStaffId, detectVersion, LATEST_FORMAT_VERSION } from "./compat.js";
 import { analyzeVoicing } from "./render/voicing.js";
 import { annotateTuplets } from "./render/tuplets.js";
 import { findVoltaStart, mergeRepeatMarkers, analyzeRepeats, applyRepeats } from "./render/repeats.js";
+import { annotateGraceNotes, graceCommandFor } from "./render/graceNotes.js";
 
 /** 
  * @param {MetaTag} metaTag 
@@ -510,9 +511,28 @@ export const readPartInfo = (part, staffInfo, staffOffset = 0) => {
         }
         let defaultConcertClef = staff.get('defaultConcertClef')? staff.get('defaultConcertClef') : null;
         let defaultClef = staff.get('defaultClef')? staff.get('defaultClef') : defaultConcertClef;
+        const staffType = staff.get('StaffType');
+        // Only present when it differs from LilyPond's/MuseScore's own default
+        // of 5 (e.g. single-line percussion staves); see renderStaffLineCount.
+        const lineCount = staffType && staffType.get('lines') ? parseInt(staffType.get('lines'), 10) : null;
+        // <bracket type=".." span=".." col=".."/> is MuseScore's own already-
+        // computed grouping (col="0" = outermost, e.g. the whole woodwind
+        // section; deeper col values are nested sub-brackets, e.g. 2 clarinets
+        // within that section) — used directly instead of re-deriving section
+        // membership from instrument-family heuristics (see readPartsInfo).
+        let brackets = staff.get('bracket');
+        if (brackets && !Array.isArray(brackets)) {
+            brackets = [brackets];
+        }
         return {
             id: staffId,
-            StaffType: staff.get('StaffType'),
+            StaffType: staffType,
+            lineCount,
+            brackets: (brackets || []).map((bracket) => ({
+                type: bracket.get('type'),
+                span: parseInt(bracket.get('span'), 10),
+                col: bracket.get('col'),
+            })),
             isStaffVisible: staff.get('isStaffVisible'),
             barLineSpan: staff.get('barLineSpan'),
             defaultClef,
@@ -532,69 +552,49 @@ export const readPartInfo = (part, staffInfo, staffOffset = 0) => {
 export const readPartsInfo = (parts = [], orderInfo, staffInfo) => {
     // this returns an object with the part name as key
     // and any staffs used in the part, plus other information
-    
-    // sadly the instruments in the orderInfo is not ordered as in the score
-    // also, the order is inconclusive based on the info available in the orderInfo
-    // there is no direct evidence why the string instruments are below the keyboards
     if (!Array.isArray(parts)) {
         parts = parts ? [parts] : [];
     }
-    // so we better go by parts, find sections they could belong to, and wrap them that way.
     let staffOffset = 0;
     const partsInfo = parts.map((part) => {
         const info = readPartInfo(part, staffInfo, staffOffset);
         staffOffset += info ? info.staffs.length : 0;
         return info;
     });
-    // per part we need to find:
-    // - sections
-    // - multiple staffs
-    
+    // Group parts using MuseScore's own already-computed bracket spans
+    // (<bracket col="0"> on a part's first staff = an outermost bracket,
+    // e.g. the whole woodwind section) rather than re-deriving section
+    // membership from instrument-family heuristics: a part's own
+    // instrumentId (e.g. "wind.reed.clarinet.bflat") uses a different
+    // taxonomy than <Order>'s instrument ids (e.g. "bb-clarinet"), and
+    // doesn't reliably substring-match either the section id or family name.
+    // type="1" (brace) is excluded: that's a single multi-staff instrument's
+    // own grand-staff brace (e.g. piano), already handled by the
+    // `staffs.length > 1` PianoStaff branch in renderPart, not a
+    // cross-part section grouping.
     let ret = [];
-    let currentSection = {
-        isSection: true,
-        id: null,
-        parts: []
-    };
-    partsInfo.forEach((partInfo) => {
-        // we trust the order of the instruments in the partInfo
-        // take the instrumentId
-        const instrumentId = partInfo.instrument[0].instrumentId;
-        const section = orderInfo.sections.find((section) => {
-            const sharesSectionFamilies = [section.family].flat().some((family) => {
-                return instrumentId.includes(family);
-            });
-            const sharesSectionId = instrumentId.includes(section.id);
-            return sharesSectionFamilies || sharesSectionId;
+    let i = 0;
+    while (i < partsInfo.length) {
+        const partInfo = partsInfo[i];
+        const firstStaff = partInfo && partInfo.staffs[0];
+        const outerBracket = firstStaff && firstStaff.brackets.find((bracket) => {
+            return parseInt(bracket.col, 10) === 0 && bracket.span > 1 && parseInt(bracket.type, 10) !== 1;
         });
-        if (section) {
-            if (currentSection.id === section.id) {
-                // we are still in the same section
-                currentSection.parts.push(partInfo);
-            }
-            else {
-                // we are in a new section
-                if (currentSection.id && currentSection.id !== section.id) {
-                    // we need to close the current section
-                    ret.push(currentSection);
-                }
-                // we start a new section
-                currentSection = {
-                    id: section.id,
-                    isSection: true,
-                    parts: [partInfo]
-                }
-            }
-        }
-        else {
-            // no problem, it is then not part of a section
-            // we add it straight
+        if (!outerBracket) {
             ret.push(partInfo);
+            i += 1;
+            continue;
         }
-    });
-    // we need to close the last section
-    if (currentSection.id) {
-        ret.push(currentSection);
+        // the bracket's span counts *staves*, not parts — a part can itself
+        // have more than one staff (e.g. a piano within the section)
+        let stavesRemaining = outerBracket.span;
+        const sectionParts = [];
+        while (stavesRemaining > 0 && i < partsInfo.length) {
+            sectionParts.push(partsInfo[i]);
+            stavesRemaining -= partsInfo[i].staffs.length;
+            i += 1;
+        }
+        ret.push({ isSection: true, id: outerBracket.type, parts: sectionParts });
     }
     return ret;
 }
@@ -617,7 +617,7 @@ export const readOrderInfo = (order) => {
     if (!Array.isArray(instruments)) {
         instruments = [instruments];
     }
-    instruments.map((instrument) => {
+    instruments = instruments.map((instrument) => {
         let fam = instrument.get('family', true);
         if (!Array.isArray(fam)) {
             fam = [fam];
@@ -637,7 +637,7 @@ export const readOrderInfo = (order) => {
     if (!Array.isArray(sections)) {
         sections = [sections];
     };
-    sections.map((section) => {
+    sections = sections.map((section) => {
         let unsorted = section.get('unsorted');
         if (unsorted && !Array.isArray(unsorted)) {
             unsorted = [unsorted];
@@ -1029,7 +1029,11 @@ function handleChord(evt, ctx) {
         ctx.lyrics.push(lyric);
         ctx.lastLyric = lyric;
     }
-    ctx.currentTime += duration;
+    // Grace notes borrow their time from the note they precede; MuseScore
+    // doesn't count them towards the measure's own length, so neither should we.
+    if (!ctx.isGraceNote) {
+        ctx.currentTime += duration;
+    }
     const renderedChord = parseChord(evt, ctx.currentTimeSig, ctx.currentKeySig, ctx.lastLyric);
     return applyPendingModifiers(renderedChord, ctx.voiceConsumer);
 }
@@ -1121,12 +1125,13 @@ export const renderMusicForStaff = (staff, formatVersion = LATEST_FORMAT_VERSION
         voiceConsumer: null,
         voiceIdx: 0,
         currentTupletRatio: null,
+        isGraceNote: false,
     };
     let barNumber = 0;
     const ret = staffContents.map((measure) => {
         barNumber += 1;
+        let measureText = '';
         // TODO: we need to do something about the transposition
-        let measureText = "";
         if (measure.len) {
             // we assume a \partial for now
             measureText += `\\partial ${durationMap[measure.len]}`;
@@ -1137,15 +1142,22 @@ export const renderMusicForStaff = (staff, formatVersion = LATEST_FORMAT_VERSION
             ctx.voiceConsumer = new OnceConsumer('lifo');
             ctx.voiceIdx = voiceIdx;
 
-            const annotated = annotateTuplets(voice);
-            return annotated.map(({ evt, tupletRatio, tupletPosition }) => {
+            const annotated = annotateGraceNotes(annotateTuplets(voice));
+            return annotated.map(({ evt, tupletRatio, tupletPosition, graceType, graceGroupStart, graceGroupEnd }) => {
                 ctx.currentTupletRatio = tupletRatio;
+                ctx.isGraceNote = !!graceType;
                 const handler = eventHandlers[evt.name];
                 let rendered = handler ? handler(evt, ctx) : '';
                 if (tupletPosition === 'start') {
                     rendered = `\\tuplet ${tupletRatio.actual}/${tupletRatio.normal} { ${rendered}`;
                 }
                 if (tupletPosition === 'end') {
+                    rendered = `${rendered} }`;
+                }
+                if (graceGroupStart) {
+                    rendered = `${graceCommandFor(graceType)} { ${rendered}`;
+                }
+                if (graceGroupEnd) {
                     rendered = `${rendered} }`;
                 }
                 return rendered;
@@ -1159,6 +1171,7 @@ export const renderMusicForStaff = (staff, formatVersion = LATEST_FORMAT_VERSION
         // voice, or genuine polyphony — decided from the parsed data, not by
         // inspecting the rendered strings.
         const voicingDecision = analyzeVoicing(voices);
+        let body;
         if (voicingDecision.type === 'empty') {
             // Emit a spacer rest so bar checks remain valid in LilyPond and
             // currentTime stays aligned for subsequent lyric timing. Any
@@ -1189,15 +1202,20 @@ export const renderMusicForStaff = (staff, formatVersion = LATEST_FORMAT_VERSION
                 spacer = 's1';
             }
             const structuralText = nonEmptyVoices.length ? `${nonEmptyVoices.join(' ')} ` : '';
-            const barComment = showBarNumbers ? ` % ${barNumber}` : '';
-            return `${measureText} ${structuralText}${spacer}${barComment}`;
+            body = `${measureText} ${structuralText}${spacer}`;
         }
-        if (voicingDecision.type === 'parallel') {
-            const barComment = showBarNumbers ? ` % ${barNumber}` : '';
-            return `${measureText} << { ${nonEmptyVoices.join(' } \\\\ { ')} } >>${barComment}`;
+        else if (voicingDecision.type === 'parallel') {
+            body = `${measureText} << { ${nonEmptyVoices.join(' } \\\\ { ')} } >>`;
         }
-        const barComment = showBarNumbers ? ` % ${barNumber}` : '';
-        return `${measureText} ${nonEmptyVoices[0]}${barComment}`;
+        else {
+            body = `${measureText} ${nonEmptyVoices[0]}`;
+        }
+        // A `%` line comment runs to the end of the physical line, so the bar
+        // number must be the very last thing on it — otherwise it would eat
+        // the caller's own bar-check/final barline that follows on the same
+        // line (see renderLilypond, which breaks its line before \bar "|."
+        // when showBarNumbers is on for exactly this reason).
+        return showBarNumbers ? `${body} | % ${barNumber}` : body;
     });
     // Applied identically for every staff regardless of its own content (see
     // render/repeats.js) since the repeat barline spans the whole system.
@@ -1315,6 +1333,14 @@ const renderLyrics = (lyrics) => {
     return ret.join(" ");
 }
 
+// MuseScore's default staff has 5 lines; only single-line percussion staves
+// (and similar non-standard cases) carry an explicit <lines> override.
+export const renderStaffOpen = (lineCount) => {
+    if (!lineCount || lineCount === 5) {
+        return '\\new Staff {\n';
+    }
+    return `\\new Staff \\with {\n    \\override StaffSymbol.line-count = #${lineCount}\n} {\n`;
+}
 
 const renderPart = (part, formatVersion, showBarNumbers = false, repeatRegions = []) => {
     const partName = part.trackName;
@@ -1342,7 +1368,7 @@ const renderPart = (part, formatVersion, showBarNumbers = false, repeatRegions =
             const partDataName = createValidPartName(`${partName}${idx+1}`);
             ret.musicData[`${partDataName}`] = staff.measures;
             const clefname = renderClef(staff.defaultClef);
-            tmpScoreData += "\\new Staff {\n";
+            tmpScoreData += renderStaffOpen(staff.lineCount);
             tmpScoreData += `    ${clefname} \n`;
             if (transposition) tmpScoreData += `    \\transpose ${transposition} { \n`;
             tmpScoreData += `    \\${partDataName}\n`; 
@@ -1361,7 +1387,7 @@ const renderPart = (part, formatVersion, showBarNumbers = false, repeatRegions =
         ret.musicData[partDataName] = renderedStaff.measures;
         const clefname = renderClef(part.staffs[0].defaultClef);
         // render the score contents for the Score 
-        let tmpScoreData = "  \\new Staff {\n";
+        let tmpScoreData = `  ${renderStaffOpen(part.staffs[0].lineCount)}`;
         tmpScoreData += `    \\set Staff.instrumentName = "${longName}"\n`;
         tmpScoreData += `    \\set Staff.shortInstrumentName = "${shortName}"\n`;
         tmpScoreData += `    ${clefname} \n`;
@@ -1383,7 +1409,7 @@ const renderPart = (part, formatVersion, showBarNumbers = false, repeatRegions =
         ret.scoreData.push(tmpScoreData);
 
         // render the score contents for sthe separate part
-        let tmpPartData = `\\new Staff { \n`;
+        let tmpPartData = renderStaffOpen(part.staffs[0].lineCount);
         if (transposition) tmpPartData += `    \\transpose ${transposition} { \n`;
         tmpPartData +=  `${clefname} \n   \\${partDataName } \n`;
         if (staffHasLyrics) {
@@ -1470,8 +1496,16 @@ export const renderLilypond = (partsInfo, metaInfo, options = {}, formatVersion 
     });
 
     let music = "";
+    // When bar numbers are on, each measure already ends with its own
+    // `| % N` line comment (see renderMusicForStaff), so the join must not
+    // add its own ` |` too — that would land after the `%` and just be dead
+    // text sitting past the end of a line that's supposed to end with the
+    // bar number. Likewise \bar "|." needs a fresh line of its own, or it
+    // would get swallowed into the last measure's comment.
+    const measureJoin = options.showBarNumbers ? '\n  ' : ' |\n  ';
+    const finalBarLead = options.showBarNumbers ? '\n ' : ' ';
     Object.keys(data.musicData).forEach((key) => {
-        music += `${key} = { \n ${data.musicData[key].join(' |\n  ')} \\bar "|."\n}\n`;
+        music += `${key} = { \n ${data.musicData[key].join(measureJoin)}${finalBarLead}\\bar "|."\n}\n`;
     });
     let parts = "";
     Object.keys(data.partData).forEach((key) => {
