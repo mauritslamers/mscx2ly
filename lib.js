@@ -447,7 +447,8 @@ export function renderBarLine(barLine) {
                 // divisio maior — a bigger pause than divisio minima. LilyPond has no
                 // dedicated \bar glyph for this (real Gregorian notation uses
                 // \caesura \shortfermata, a note-attached event, not a barline token);
-                // reusing ',' as it is almost identical to divisio minima effectively.
+                // \bar ";" is a dotted barline, which doesn't match either, so reuse
+                // ',' as the closest available approximation.
                 str = ",";
             }
             break;

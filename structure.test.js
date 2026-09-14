@@ -101,6 +101,14 @@ test('renderBarLine: gregorian barlines are resolved from span offsets', t => {
     t.is(renderBarLine(barLineNode(null, '-2', '-2')), '\\bar ","');
 });
 
+test('renderBarLine: divisio minima (positive-offset variant, e.g. all_barlines.mscz bar 14) also renders as a comma', t => {
+    t.is(renderBarLine(barLineNode(null, '2', '-2')), '\\bar ","');
+});
+
+test('renderBarLine: divisio maior (e.g. all_barlines.mscz bar 15) also renders as a comma', t => {
+    t.is(renderBarLine(barLineNode(null, '1', '-1')), '\\bar ","');
+});
+
 test('renderBarLine: unknown subtype renders nothing rather than throwing', t => {
     t.is(renderBarLine(barLineNode('not-a-real-subtype')), '');
 });
