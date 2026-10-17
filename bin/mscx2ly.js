@@ -72,7 +72,7 @@ program
             omitParts: options.omitParts !== undefined? options.omitParts : false,
             renderingOptions: {
                 scorePaperSize: options.scorePapersize,
-                partsPaperSize: options.partsPaperSize,
+                partsPaperSize: options.partsPapersize,
                 scoreStaffSize: options.scoreStaffsize,
                 partsStaffSize: options.partsStaffsize,
                 showBarNumbers: options.showBarNumbers,

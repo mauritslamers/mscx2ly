@@ -61,6 +61,16 @@ const parseTimeSig = (timeSig) => {
 }
 
 
+// Length in quarter notes of a LilyPond duration such as "8" or "\\breve".
+const quartersOfLily = (d) => (d === '\\breve' ? 8 : d === '\\longa' ? 16 : 4 / parseInt(d, 10));
+
+// "5/8" has no single LilyPond duration, but 8*5 is one.
+const lilyDurationOf = (ratio) => {
+    if (durationMap[ratio]) return durationMap[ratio];
+    const [n, d] = String(ratio).split('/').map(Number);
+    return n && d ? `${d}*${n}` : undefined;
+};
+
 const durationMap = {
     "1": "1",
     "1/1": "1",
@@ -99,7 +109,13 @@ const durationMap = {
     "quarter": "4",
     "eighth": "8",
     "16th": "16",
-    "32nd": "32",   
+    "32nd": "32",
+    "64th": "64",
+    "128th": "128",
+    "breve": "\\breve",
+    "long": "\\longa",
+    "1/64": "64",
+    "1/128": "128",
 }
 
 // Words LilyPond refuses as variable names (checked against 2.24.3), e.g. a part called "Drums".
@@ -109,7 +125,20 @@ export const lilypondKeywords = new Set([
     'figuremode', 'figures', 'header', 'include', 'layout', 'lyricmode', 'lyrics', 'lyricsto', 'maininput',
     'markup', 'markuplist', 'midi', 'name', 'new', 'notemode', 'override', 'paper', 'remove', 'repeat',
     'rest', 'revert', 'score', 'sequential', 'set', 'simultaneous', 'tempo', 'type', 'unset', 'version', 'with',
+    // commands and dynamics this converter writes itself: a variable of that name would redefine them
+    'bar', 'box', 'clef', 'downbow', 'espressivo', 'fadein', 'fadeout', 'fermata', 'flageolet',
+    'grace', 'acciaccatura', 'appoggiatura', 'henzelongfermata', 'henzeshortfermata', 'italic', 'key',
+    'longfermata', 'major', 'mark', 'open', 'partial', 'sawtooth', 'shortfermata',
+    'snappizzicato', 'swell', 'time', 'transpose', 'tuplet', 'upbow', 'verylongfermata', 'veryshortfermata',
+    'markup', 'breve', 'longa', 'dynamic',
+    'p', 'pp', 'ppp', 'pppp', 'f', 'ff', 'fff', 'ffff', 'mp', 'mf', 'fp', 'fz', 'rfz', 'sf', 'sff', 'sfp', 'sfz', 'sp', 'spp',
 ]);
+
+// Note and rest names (Dutch note names, LilyPond's default) cannot be variable names either:
+// "S", "A", "T", "B" are all valid part names in a choir score.
+export const isReservedIdentifier = (id) => lilypondKeywords.has(id)
+    || /^[a-g](?:is|es|s|ih|eh)*$/.test(id)
+    || ['r', 's', 'q'].includes(id);
 
 export const createValidPartName = (partName) => {
     // we need to make the partname a valid lilypond identifier
@@ -130,7 +159,7 @@ export const createValidPartName = (partName) => {
     // (e.g. "Vln.", "Clarinet (Bb)") collapse to one and never lead or trail the name
     validPartName = validPartName.replace(/[^\p{L}\p{M}]+/gu, '_').replace(/^_+|_+$/g, '');
     validPartName = validPartName || 'part';
-    return lilypondKeywords.has(validPartName) ? `${validPartName}Part` : validPartName;
+    return isReservedIdentifier(validPartName) ? `${validPartName}Part` : validPartName;
 }
 
 
@@ -214,7 +243,7 @@ const articulationMap = {
     "stringsHarmonic": "\\flageolet",
     "stringsUpBow": "\\upbow",
     "stringsDownBow": "\\downbow",
-    "articLaisserVibrer": "\\laisserVibrer",
+    "articLaisserVibrer": "\\laissezVibrer",
     "articSoftAccentBelow": "\\espressivo", // espressivo
     "articSoftAccentStaccatoBelow": "-.\\espressivo", // espressivo staccato
     "articSoftAccentTenutoBelow": "--\\espressivo", // espressivo tenuto
@@ -313,7 +342,7 @@ const parseNote = (note, keySig) => {
  * @param {Chord} chord
  * @param {TimeSig} timeSig 
  */
-export const parseChord = (chord, timeSig, keySig, lyric) => {
+export const parseChord = (chord, timeSig, keySig, lyric, lyricDuration) => {
     const dur = durationMap[chord.get('durationType')];
     if (!dur) {
         console.warn(`[mscx2ly] Unknown chord duration type: "${chord.get('durationType')}", skipping chord`);
@@ -372,29 +401,13 @@ export const parseChord = (chord, timeSig, keySig, lyric) => {
             }
         });
     }
-    if (hasTie) {
-        if (lyric) {
-            if (lyric.isDone === undefined) {
-                lyric.isDone = false;
-            }
-            else {
-                lyric.end += 4/parseFloat(dur);
-            }
-        }
-        ret += ' ~';
+    // lyric.isDone: undefined on the chord that carries the lyric, false while a tie chain from it
+    // runs (those chords lengthen the lyric), true once the chain has ended
+    if (lyric && lyric.isDone !== true) {
+        if (lyric.isDone === false) lyric.end += lyricDuration ?? quartersOfLily(dur);
+        lyric.isDone = !hasTie;
     }
-    else {
-        // add the duration to the lyric
-        if (lyric) {
-            if (lyric.isDone === undefined) {
-                lyric.isDone = true;
-            }
-            else { // continuing from previous note
-                lyric.end += 4/parseFloat(dur);
-                lyric.isDone = true;
-            }
-        }
-    }
+    if (hasTie) ret += ' ~';
     return ret;
 }
 
@@ -490,7 +503,7 @@ export const readPartInfo = (part, staffInfo, staffOffset = 0) => {
     }
     const ret = {};
     ret.id = part.get('id');
-    ret.trackName = part.get('trackName');
+    ret.trackName = plainTextOf(part.get('trackName', true)) ?? '';
     ret.instrument = instruments.map((instrument) => {
         // Handle null instrument case
         if (!instrument) return null;
@@ -500,8 +513,8 @@ export const readPartInfo = (part, staffInfo, staffOffset = 0) => {
         }
         return {
             id: instrument.get('id'),
-            longName: instrument.get('longName'),
-            shortName: instrument.get('shortName'),
+            longName: plainTextOf(instrument.get('longName', true)) ?? '',
+            shortName: plainTextOf(instrument.get('shortName', true)) ?? '',
             trackName: instrument.get('trackName'),
             minPitchP: instrument.get('minPitchP'),
             maxPitchP: instrument.get('maxPitchP'),
@@ -793,7 +806,8 @@ const escapeLilyString = (text) => String(text ?? '').replace(/\\/g, '\\\\').rep
 const plainTextOf = (text) => (typeof text === 'string' ? text : text?.plainText);
 
 export const renderRehearsalMark = (mark) => {
-    return `\\mark \\markup { \\box "${escapeLilyString(plainTextOf(mark.get('text', true)))}" }`;
+    const label = plainTextOf(mark.get('text', true));
+    return label ? `\\mark \\markup { \\box "${escapeLilyString(label)}" }` : '';
 }
 
 export const renderHairPin = (spanner) => {
@@ -804,7 +818,7 @@ export const renderHairPin = (spanner) => {
     const hairpin = spanner.get('HairPin'); // this will be null when isEnd
     const isStart = !!spanner.get('next');
     const subType = hairpin.get('subtype'); // 0 for cresc, 1 for decresc
-    const type = subType === '0'? '\\<' : '\\>';
+    const type = (subType === '0' || subType === '2') ? '\\<' : '\\>'; // 0 cresc. hairpin, 2 cresc. line
     return type;
 }
 
@@ -852,6 +866,12 @@ class OnceConsumer {
         return this.data[key] && this.data[key].length > 0;
     }
 
+    getAll (key) {
+        const all = this.data[key] || [];
+        this.data[key] = [];
+        return all;
+    }
+
     get (key) {
         if (this.data[key] && this.data[key].length > 0) {
             if (this.type === 'lifo') {
@@ -877,18 +897,23 @@ export const renderDynamic = (dynamic) => {
         case 'ff': ret = '\\ff'; break;
         case 'fff': ret = '\\fff'; break;
         case 'fp': ret = '\\fp'; break;
-        case 'pf': ret = '\\pf'; break;
+        case 'pf': ret = '_\\markup { \\dynamic pf }'; break;
         case 'sf': ret = '\\sf'; break;
         case 'sfz': ret = '\\sfz'; break;
         case 'sff': ret = '\\sff'; break;
-        case 'sffz': ret = '\\sffz';
+        case 'sffz': ret = '_\\markup { \\dynamic sffz }'; break;
         case 'sfp': ret = '\\sfp'; break;
         case 'rfz': ret = '\\rfz'; break;
-        case 'rf': ret = '\\rf'; break;
+        case 'rf': ret = '_\\markup { \\dynamic rf }'; break;
         case 'fz': ret = '\\fz'; break;        
     }
     return ret;
 }
+
+const containsSym = (node) => node['#name'] === 'sym' || (node.$$ || []).some(containsSym);
+const collectSyms = (node) => node['#name'] === 'sym'
+    ? [typeof node._ === 'string' ? node._ : '']
+    : (node.$$ || []).flatMap(collectSyms);
 
 export const parseTempo = (tempoEvt) => {
     // this requires a bit of trickery
@@ -945,7 +970,7 @@ export const parseTempo = (tempoEvt) => {
         if (tempoValue) {
             tempoValue = parseInt(tempoValue, 10);
         }
-        else if (!textNode.get('sym')) {
+        if (!containsSym(textNode.data)) {
             // formatted free text such as <text><b>Allegro</b></text>: keep the words, drop the formatting
             tempoText = textNode.plainText.replace(/\s+/g, ' ').trim() || undefined;
         }
@@ -954,7 +979,8 @@ export const parseTempo = (tempoEvt) => {
         tempoText = textNode.text;
     }
 
-    const tempoSymbol = (!type && textNode && textNode.hasChildren) ? textNode.get('sym') : "";
+    const syms = (!type && textNode && textNode.hasChildren) ? collectSyms(textNode.data) : [];
+    const tempoSymbol = syms.length === 1 ? syms[0] : (syms.length ? syms : "");
     const tempoSymbolValue = type? "": metronomeNoteSymbolMap[tempoSymbol];
     if (!tempoSymbolValue && !type && !tempoText) {
         console.warn('Unknown tempo symbol:', tempoSymbol);
@@ -986,9 +1012,28 @@ export const renderTempo = (tempoInfo) => {
 // falls through without an explicit `return`).
 
 function handleTempo(evt, ctx) {
-    ctx.currentTempo = parseTempo(evt);
-    return renderTempo(ctx.currentTempo);
+    const tempo = parseTempo(evt);
+    // a text-only marking ("a tempo", "Lento") leaves the running metronome tempo in force
+    if (tempo.tempoValue && tempo.tempoSymbolValue) {
+        ctx.currentTempo = tempo;
+        ctx.tempoMap.push({ at: ctx.currentTime, msPerQuarter: 60000 * tempo.tempoSymbolValue / (4 * tempo.tempoValue) });
+    }
+    return renderTempo(tempo);
 }
+
+// Milliseconds at a position in quarter notes; the first tempo also covers anything before it.
+const quartersToMs = (quarters, tempoMap) => {
+    let ms = 0;
+    let at = 0;
+    let rate = tempoMap[0].msPerQuarter;
+    for (const change of tempoMap) {
+        if (change.at >= quarters) break;
+        ms += (change.at - at) * rate;
+        at = change.at;
+        rate = change.msPerQuarter;
+    }
+    return Math.round((ms + (quarters - at) * rate) * 1000) / 1000;
+};
 
 function handleKeySig(evt, ctx) {
     if (ctx.isPercussion) return;
@@ -1003,7 +1048,7 @@ function handleTimeSig(evt, ctx) {
 
 function applyPendingModifiers(rendered, voiceConsumer) {
     if (voiceConsumer.has('dynamic')) rendered = `${rendered}${voiceConsumer.get('dynamic')}`;
-    if (voiceConsumer.has('spanner')) rendered = `${rendered}${voiceConsumer.get('spanner')}`;
+    if (voiceConsumer.has('spanner')) rendered = `${rendered}${voiceConsumer.getAll('spanner').join('')}`;
     if (voiceConsumer.has('text')) rendered = `${rendered}${voiceConsumer.get('text')}`;
     if (voiceConsumer.has('fermata')) rendered = `${rendered}${voiceConsumer.get('fermata')}`;
     return rendered;
@@ -1025,7 +1070,7 @@ function handleRest(evt, ctx) {
             // separately, e.g. durationType="half" dots="1" for a dotted half.
             const dots = evt.get('dots') ? parseInt(evt.get('dots'), 10) : 0;
             const dotMultiplier = 2 - Math.pow(2, -dots);
-            ctx.currentTime += 4 / parseInt(restDur, 10) * dotMultiplier * tupletScale;
+            ctx.currentTime += quartersOfLily(restDur) * dotMultiplier * tupletScale;
         }
     }
     const renderedRest = parseRest(evt, ctx.currentTimeSig);
@@ -1037,7 +1082,11 @@ function handleChord(evt, ctx) {
     const chordRaw = evt.get('duration') || evt.get('durationType');
     const chordParts = chordRaw && chordRaw.includes('/') ? chordRaw.split('/').map(Number) : null;
     let duration = chordParts ? 4 * chordParts[0] / chordParts[1]
-        : (() => { const d = getDurationFor(evt); return d ? 4 / parseInt(d, 10) : 0; })();
+        : (() => {
+            const d = getDurationFor(evt);
+            const dots = evt.get('dots') ? parseInt(evt.get('dots'), 10) : 0;
+            return d ? quartersOfLily(d) * (2 - Math.pow(2, -dots)) : 0;
+        })();
     if (ctx.currentTupletRatio) {
         duration *= ctx.currentTupletRatio.normal / ctx.currentTupletRatio.actual;
     }
@@ -1056,19 +1105,26 @@ function handleChord(evt, ctx) {
             voiceIdx: ctx.voiceIdx,
             start: ctx.currentTime,
             end: ctx.currentTime + duration,
-            text: lyricData.get('text'),
+            text: plainTextOf(lyricData.get('text', true)) ?? '',
             syllabic: lyricData.get('syllabic'),
             currentTempo: ctx.currentTempo,
         };
+        // the staff's tempo changes, complete once the staff is rendered; not part of the printed timing data
+        Object.defineProperty(lyric, 'tempoMap', { value: ctx.tempoMap });
+        // an extender line (<ticks>1/1</ticks>, a whole note) keeps the syllable going past its own notes
+        const [tickN, tickD] = String(lyricData.get('ticks') ?? '').split('/').map(Number);
+        Object.defineProperty(lyric, 'melismaEnd', { value: tickN && tickD ? ctx.currentTime + 4 * tickN / tickD : 0 });
         ctx.lyrics.push(lyric);
-        ctx.lastLyric = lyric;
+        ctx.lastLyrics[ctx.voiceIdx] = lyric;
     }
     // Grace notes borrow their time from the note they precede; MuseScore
     // doesn't count them towards the measure's own length, so neither should we.
     if (!ctx.isGraceNote) {
         ctx.currentTime += duration;
     }
-    const renderedChord = parseChord(evt, ctx.currentTimeSig, ctx.currentKeySig, ctx.lastLyric);
+    const renderedChord = parseChord(evt, ctx.currentTimeSig, ctx.currentKeySig, ctx.isGraceNote ? null : ctx.lastLyrics[ctx.voiceIdx], duration);
+    // a skipped chord or a grace chord leaves dynamics, hairpins and fermatas for the note they belong to
+    if (!renderedChord || ctx.isGraceNote) return renderedChord;
     return applyPendingModifiers(renderedChord, ctx.voiceConsumer);
 }
 
@@ -1154,7 +1210,8 @@ export const renderMusicForStaff = (staff, formatVersion = LATEST_FORMAT_VERSION
         currentTimeSig: null,
         currentTempo: undefined,
         currentTime: 0,
-        lastLyric: undefined,
+        lastLyrics: {},
+        tempoMap: [],
         lyrics: [],
         voiceConsumer: null,
         voiceIdx: 0,
@@ -1168,20 +1225,27 @@ export const renderMusicForStaff = (staff, formatVersion = LATEST_FORMAT_VERSION
         // TODO: we need to do something about the transposition
         if (measure.len) {
             // we assume a \partial for now
-            measureText += `\\partial ${durationMap[measure.len]}`;
+            measureText += `\\partial ${lilyDurationOf(measure.len)}`;
         }
         const voices = measure.voice;
+        const voiceRenderedMusic = [];
+        const measureStart = ctx.currentTime;
+        let measureEnd = measureStart;
         const parsedVoices = voices.map((voice, voiceIdx) => {
             // we need to keep the fermata, as in Lilypond it should always follow the event it is attached to
             ctx.voiceConsumer = new OnceConsumer('lifo');
             ctx.voiceIdx = voiceIdx;
+            ctx.currentTime = measureStart;
 
             const annotated = annotateGraceNotes(annotateTuplets(voice));
-            return annotated.map(({ evt, tupletRatio, tupletOpens, tupletCloses, graceType, graceGroupStart, graceGroupEnd }) => {
+            const voiceText = annotated.map(({ evt, tupletRatio, tupletOpens, tupletCloses, graceType, graceGroupStart, graceGroupEnd }) => {
                 ctx.currentTupletRatio = tupletRatio;
                 ctx.isGraceNote = !!graceType;
                 const handler = eventHandlers[evt.name];
                 let rendered = (handler ? handler(evt, ctx) : '') ?? '';
+                if ((evt.name === 'Chord' || evt.name === 'Rest') && !graceType && String(rendered).trim()) {
+                    voiceRenderedMusic[voiceIdx] = true;
+                }
                 if (tupletOpens.length) {
                     const opens = tupletOpens.map(r => `\\tuplet ${r.actual}/${r.normal} {`).join(' ');
                     rendered = `${opens} ${rendered}`;
@@ -1197,7 +1261,10 @@ export const renderMusicForStaff = (staff, formatVersion = LATEST_FORMAT_VERSION
                 }
                 return rendered;
             }).join(' ');
+            measureEnd = Math.max(measureEnd, ctx.currentTime);
+            return voiceText;
         });
+        ctx.currentTime = measureEnd;
         // A voice with no supported children renders to an empty string.
         // Filter those out so they don't produce stray spaces/empty blocks.
         const nonEmptyVoices = parsedVoices.filter(v => v && v.trim());
@@ -1210,7 +1277,7 @@ export const renderMusicForStaff = (staff, formatVersion = LATEST_FORMAT_VERSION
         // measure still needs the spacer so bar checks and timing stay aligned.
         const musicalIdxs = voicingDecision.type === 'single' ? [voicingDecision.voiceIdx]
             : voicingDecision.type === 'parallel' ? voicingDecision.voiceIdxs : [];
-        const rendersMusic = musicalIdxs.some((idx) => parsedVoices[idx] && parsedVoices[idx].trim());
+        const rendersMusic = musicalIdxs.some((idx) => voiceRenderedMusic[idx]);
         let body;
         if (voicingDecision.type === 'empty' || !rendersMusic) {
             // Emit a spacer rest so bar checks remain valid in LilyPond and
@@ -1222,7 +1289,7 @@ export const renderMusicForStaff = (staff, formatVersion = LATEST_FORMAT_VERSION
                 // Pickup (partial) measure: spacer must match the partial duration.
                 // Derive currentTime from the raw ratio (e.g. "3/8") to correctly
                 // handle dotted durations — parseInt on the LilyPond string "4." drops the dot.
-                const partialDur = durationMap[measure.len];
+                const partialDur = lilyDurationOf(measure.len);
                 const [num, den] = measure.len.split('/').map(Number);
                 const partialQuarters = (num && den) ? 4 * num / den : 0;
                 ctx.currentTime += partialQuarters;
@@ -1261,6 +1328,8 @@ export const renderMusicForStaff = (staff, formatVersion = LATEST_FORMAT_VERSION
     });
     // Applied identically for every staff regardless of its own content (see
     // render/repeats.js) since the repeat barline spans the whole system.
+    // voices are rendered one after another, so tempo marks can have been collected out of time order
+    ctx.tempoMap.sort((x, y) => x.at - y.at);
     return { lyrics: ctx.lyrics, music: applyRepeats(ret, repeatRegions) };
 }
 
@@ -1297,7 +1366,7 @@ const calculateTransposition = (part) => {
     // but we store the amount of octaves we took out
     // we add that to the endnote
     if (Math.abs(diatonic) > 7) {
-        octaves = Math.floor(diatonic / 7); // we want to keep the sign
+        octaves = Math.trunc(diatonic / 7); // we want to keep the sign
         diatonic = diatonic % 7;
         chromatic = chromatic % 12; // bring it back to the octave
     }
@@ -1350,7 +1419,7 @@ const calculateTransposition = (part) => {
             endName += `,`.repeat(octaves);
         }
         if (octaves < 0) {
-            endName += `'`.repeat(octaves);
+            endName += `'`.repeat(-octaves);
         }
     }
     return `c ${endName}`;
@@ -1363,8 +1432,8 @@ const renderLyrics = (lyrics) => {
         if (typeof lyricText !== 'string') {
             lyricText = lyricText == null ? '' : String(lyricText);
         }
-        // characters with a meaning of their own in lyricmode need the word quoted
-        if (/["\\{}$#~_\s]/.test(lyricText)) {
+        // anything but a plain word (letters, then letters or simple punctuation) needs quoting in lyricmode
+        if (!/^[\p{L}\p{M}][\p{L}\p{M}'\u2019,.!?;:]*$/u.test(lyricText)) {
             lyricText = `"${escapeLilyString(lyricText)}"`;
         }
         ret.push(lyricText);
@@ -1485,7 +1554,7 @@ export const musicIdentifiers = (partName, staffCount) => staffCount > 1
 // identifiers, is already used by another part (e.g. a two-staff "Piano" and a part named "Piano1").
 export const createPartNamer = (partsInfo) => {
     const parts = partsInfo.flatMap(p => p.isSection ? p.parts : [p]);
-    const nameOf = (part) => part.trackName ?? '';
+    const nameOf = (part) => part.trackName || 'Part';
     const totals = {};
     parts.forEach((p) => {
         const base = createValidPartName(nameOf(p));
@@ -1697,15 +1766,14 @@ export const renderLyricTimings = (data ) => {
         const { lyricData } = renderPart(part, formatVersion.value, false, [], name);
         lyricData.forEach((staffLyrics) => {
             staffLyrics.forEach(lyric => {
-                if (!lyric.currentTempo || !lyric.currentTempo.tempoValue || !lyric.currentTempo.tempoSymbolValue) {
+                lyric.end = Math.max(lyric.end, lyric.melismaEnd ?? 0);
+                if (!lyric.tempoMap || !lyric.tempoMap.length) {
                     lyric.startMs = null;
                     lyric.endMs = null;
                     return;
                 }
-                const beatPerSecond = lyric.currentTempo.tempoValue / 60;
-                const factor = 4 / lyric.currentTempo.tempoSymbolValue;
-                lyric.startMs = lyric.start * factor * beatPerSecond * 1000;
-                lyric.endMs = lyric.end * factor * beatPerSecond * 1000;
+                lyric.startMs = quartersToMs(lyric.start, lyric.tempoMap);
+                lyric.endMs = quartersToMs(lyric.end, lyric.tempoMap);
             });
         });
         ret[name] = lyricData;

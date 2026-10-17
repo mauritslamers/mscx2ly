@@ -1,9 +1,12 @@
 import test from 'ava';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdtempSync, readFileSync as readFile } from 'fs';
+import { execFileSync } from 'child_process';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import admZip from 'adm-zip';
 import xml2js from 'xml2js';
 import { XmlWrapper } from './xml_wrapper.js';
-import { convertMSCX2LY, createValidPartName, createPartNamer, lilypondKeywords, musicIdentifiers, renderLyricTimings, renderBarLine, readOrderInfo, readStaffInfo, readPartsInfo, getEventHandlers, parseRest, renderRehearsalMark, renderTempo, renderStaffOpen } from './lib.js';
+import { convertMSCX2LY, createValidPartName, createPartNamer, lilypondKeywords, isReservedIdentifier, musicIdentifiers, renderLyricTimings, renderBarLine, readOrderInfo, readStaffInfo, readPartsInfo, getEventHandlers, parseRest, renderRehearsalMark, renderTempo, renderStaffOpen } from './lib.js';
 import { findVoltaStart, analyzeRepeats, mergeRepeatMarkers, applyRepeats } from './render/repeats.js';
 
 // ---------------------------------------------------------------------------
@@ -914,7 +917,7 @@ test('createPartNamer: names and music identifiers stay unique and valid for any
             partIds.forEach(id => {
                 ids.add(id);
                 t.regex(id, validId, `invalid identifier "${id}" for "${name}"`);
-                t.false(lilypondKeywords.has(id), `"${id}" is a LilyPond keyword`);
+                t.false(isReservedIdentifier(id), `"${id}" is a LilyPond keyword`);
             });
             total += partIds.length;
         });
@@ -969,4 +972,286 @@ test('parts: a part book with lyrics wraps the music in its voice and runs staff
     const book = result.parts;
     t.true(/<<\s*\\new Staff \{[\s\S]*\\new Voice = "solo" \{\s*\\solo\s*\}[\s\S]*\\new Lyrics \\lyricsto "solo" \{[\s\S]*\}\s*>>/.test(book), book);
     t.is((book.match(/\{/g) || []).length, (book.match(/\}/g) || []).length, 'unbalanced braces');
+});
+
+test('parseTempo: formatted text containing a number but no metronome symbol keeps its words', async t => {
+    const result = await convertSynthetic(tempoXml('<b>BPM = 120</b>'));
+    t.true(result.music.includes('\\tempo "BPM = 120"'), result.music);
+});
+
+test('lyrics: a grace chord between two lyric notes does not extend the first lyric', async t => {
+    const xml = syntheticScore(`<Measure><voice>
+  <Chord><durationType>quarter</durationType><Lyrics><syllabic>begin</syllabic><text>la</text></Lyrics><Note><pitch>60</pitch><tpc>14</tpc></Note></Chord>
+  <Chord><acciaccatura/><durationType>eighth</durationType><Note><pitch>62</pitch><tpc>16</tpc></Note></Chord>
+  <Chord><durationType>quarter</durationType><Lyrics><syllabic>end</syllabic><text>la</text></Lyrics><Note><pitch>64</pitch><tpc>18</tpc></Note></Chord>
+  <Rest><durationType>half</durationType></Rest>
+</voice></Measure>`);
+    const json = await xmlParser.parseStringPromise(xml);
+    const timings = renderLyricTimings(new XmlWrapper(json.museScore));
+    const [first, second] = timings.Solo[0];
+    t.is(first.end, 1);
+    t.is(second.start, 1);
+});
+
+test('voicing: a tuplet holding only an unsupported chord still gets the measure spacer', async t => {
+    const result = await convertSynthetic(syntheticScore(`<Measure><voice>
+  <Tuplet actualNotes="3" normalNotes="2"/>
+  <Chord><durationType>1024th</durationType><Note><pitch>60</pitch><tpc>14</tpc></Note></Chord>
+  <endTuplet/>
+</voice></Measure>`));
+    t.true(result.music.includes('s1'), result.music);
+});
+
+// ---------------------------------------------------------------------------
+// Independent-review follow-ups
+// ---------------------------------------------------------------------------
+
+const chord = (type, extra = '', pitch = 60, tpc = 14) =>
+    `<Chord>${extra}<durationType>${type}</durationType><Note><pitch>${pitch}</pitch><tpc>${tpc}</tpc></Note></Chord>`;
+const lyric = (text, syllabic = 'begin') => `<Lyrics><syllabic>${syllabic}</syllabic><text>${text}</text></Lyrics>`;
+const timingsOf = async (xml) => {
+    const json = await xmlParser.parseStringPromise(xml);
+    return renderLyricTimings(new XmlWrapper(json.museScore));
+};
+const tempo120 = '<Tempo><tempo>2</tempo><text><sym>metNoteQuarterUp</sym><font face="Edwin"/> = 120</text></Tempo>';
+
+test('cli: --parts-papersize and --score-papersize both reach the output', t => {
+    const dir = mkdtempSync(join(tmpdir(), 'mscx2ly-'));
+    const input = join(dir, 'in.mscx');
+    writeFileSync(input, syntheticScore('<Measure><voice><Rest><durationType>measure</durationType><duration>4/4</duration></Rest></voice></Measure>'));
+    execFileSync('node', ['bin/mscx2ly.js', '--parts-papersize', 'a5', '--score-papersize', 'a3', input, join(dir, 'out.ly')], { stdio: 'pipe' });
+    const out = readFileSync(join(dir, 'out.ly'), 'utf8');
+    t.true(out.includes('set-paper-size "a5"'), 'parts paper size missing');
+    t.true(out.includes('set-paper-size "a3"'), 'score paper size missing');
+});
+
+test('createValidPartName: choir part names (S, A, T, B), Bar, Pf and note names never clash with LilyPond', t => {
+    ['S', 'A', 'T', 'B', 'Bar', 'Pf', 'F', 'Es', 'Bes', 'R', 'Q', 'Key', 'Time', 'Mark'].forEach((name) => {
+        const id = createValidPartName(name);
+        t.false(isReservedIdentifier(id), `${name} -> ${id}`);
+    });
+    t.is(createValidPartName('S'), 'sPart');
+    t.is(createValidPartName('Bar'), 'barPart');
+    t.is(createValidPartName('Bass'), 'bass');
+});
+
+test('createValidPartName: no command the converter emits can be produced as an identifier', t => {
+    const words = new Set();
+    ['lib.js', 'render/repeats.js', 'render/tuplets.js', 'render/graceNotes.js', 'render/voicing.js', 'render/events.js'].forEach((file) => {
+        for (const m of readFileSync(file, 'utf8').matchAll(/\\\\([a-zA-Z]+)/g)) words.add(m[1]);
+    });
+    t.true(words.size > 20, 'scan found too few commands');
+    // identifiers are lowercase, so only all-lowercase commands could ever be shadowed
+    [...words].filter((w) => w === w.toLowerCase()).forEach((w) => t.not(createValidPartName(w), w, `"${w}" can be generated as an identifier`));
+});
+
+test('voicing: a pending dynamic does not keep a measure with an unsupported chord alive', async t => {
+    const result = await convertSynthetic(syntheticScore(`<Measure><voice>
+  <Dynamic><subtype>f</subtype></Dynamic>${chord('256th')}
+</voice></Measure>
+<Measure><voice><Rest><durationType>measure</durationType><duration>4/4</duration></Rest></voice></Measure>`));
+    t.true(result.music.includes('s1'), result.music);
+});
+
+test('grace notes: a pending dynamic lands on the main note, not on the grace chord', async t => {
+    const result = await convertSynthetic(syntheticScore(`<Measure><voice>
+  <Dynamic><subtype>f</subtype></Dynamic>${chord('eighth', '<acciaccatura/>', 62, 16)}${chord('whole')}
+</voice></Measure>`));
+    t.regex(result.music, /\\acciaccatura \{[^}]*\} \S+\\f/, result.music);
+});
+
+test('dynamics: sffz, pf and rf (undefined in LilyPond) are engraved as dynamic-font text', async t => {
+    for (const dyn of ['sffz', 'pf', 'rf']) {
+        const result = await convertSynthetic(syntheticScore(`<Measure><voice>
+  <Dynamic><subtype>${dyn}</subtype></Dynamic>${chord('whole')}
+</voice></Measure>`));
+        t.true(result.music.includes(`_\\markup { \\dynamic ${dyn} }`), result.music);
+        t.false(result.music.includes(`\\${dyn}`) && !result.music.includes('\\dynamic'), result.music);
+    }
+});
+
+test('durations: 64th notes are written, not dropped', async t => {
+    const result = await convertSynthetic(syntheticScore(`<Measure><voice>${chord('64th')}</voice></Measure>`));
+    t.true(/c'?64/.test(result.music), result.music);
+});
+
+test('partial measures: a length without a single LilyPond duration (5/8) is written as a multiplied duration', async t => {
+    const result = await convertSynthetic(syntheticScore(`<Measure len="5/8"><voice><Rest><durationType>quarter</durationType></Rest></voice></Measure>`));
+    t.true(result.music.includes('\\partial 8*5'), result.music);
+    t.false(result.music.includes('undefined'), result.music);
+});
+
+test('lyric timing: dotted chords use their dots', async t => {
+    const timings = await timingsOf(syntheticScore(`<Measure><voice>
+  ${chord('quarter', '<dots>1</dots>').replace('</Chord>', lyric('a') + '</Chord>')}${chord('eighth').replace('</Chord>', lyric('b', 'end') + '</Chord>')}
+  <Rest><durationType>half</durationType></Rest>
+</voice></Measure>`));
+    const [a, b] = timings.Solo[0];
+    t.is(a.end, 1.5);
+    t.is(b.start, 1.5);
+});
+
+test('lyric timing: voices of one measure start together and the next measure follows the longest', async t => {
+    const withLyric = (type, text) => chord(type).replace('</Chord>', lyric(text, 'single') + '</Chord>');
+    const timings = await timingsOf(syntheticScore(`<Measure>
+  <voice>${withLyric('whole', 'a')}</voice><voice>${withLyric('whole', 'b')}</voice>
+</Measure><Measure><voice>${withLyric('whole', 'c')}</voice></Measure>`));
+    const [a, b, c] = timings.Solo[0];
+    t.deepEqual([a.start, a.end, b.start, b.end, c.start, c.end], [0, 4, 0, 4, 4, 8]);
+});
+
+const tiedTo = (xml) => xml.replace('<Note>', '<Note><Spanner type="Tie"><Tie/><next><location><fractions>1/4</fractions></location></next></Spanner>');
+
+test('lyric timing: a lyric lasts through its tie chain, scaled for tuplets, and no longer', async t => {
+    const timings = await timingsOf(syntheticScore(`<Measure><voice>
+  ${tiedTo(chord('quarter').replace('</Chord>', lyric('a') + '</Chord>'))}
+  <Tuplet actualNotes="3" normalNotes="2"/>${chord('eighth')}<Rest><durationType>eighth</Rest>
+  <Rest><durationType>eighth</Rest><endTuplet/>
+  ${chord('quarter')}
+  ${chord('quarter').replace('</Chord>', lyric('b', 'end') + '</Chord>')}
+</voice></Measure>`.replace(/<Rest><durationType>eighth<\/Rest>/g, '<Rest><durationType>eighth</durationType></Rest>')));
+    const [a, b] = timings.Solo[0];
+    t.true(Math.abs(a.end - (1 + 1 / 3)) < 1e-9, `a.end = ${a.end}`);
+    t.true(Math.abs(b.start - 3) < 1e-9, `b.start = ${b.start}`);
+});
+
+test('lyric timing: following chords without a lyric do not lengthen it, and an extender line does', async t => {
+    const timings = await timingsOf(syntheticScore(`<Measure><voice>
+  ${chord('quarter').replace('</Chord>', lyric('a', 'single') + '</Chord>')}${chord('quarter')}
+  ${chord('quarter').replace('</Chord>', '<Lyrics><syllabic>single</syllabic><ticks>1/2</ticks><text>b</text></Lyrics></Chord>')}
+  ${chord('quarter')}
+</voice></Measure>`));
+    const [a, b] = timings.Solo[0];
+    t.is(a.end, 1);
+    t.is(b.start, 2);
+    t.is(b.end, 4, 'a half-note extender line reaches the end of the bar');
+});
+
+test('lyric timing: milliseconds follow the tempo (quarter = 120 -> 500 ms per quarter)', async t => {
+    const timings = await timingsOf(syntheticScore(`<Measure><voice>${tempo120}
+  ${chord('quarter').replace('</Chord>', lyric('a', 'single') + '</Chord>')}
+  ${chord('quarter').replace('</Chord>', lyric('b', 'single') + '</Chord>')}
+  <Rest><durationType>half</durationType></Rest>
+</voice></Measure>`));
+    const [a, b] = timings.Solo[0];
+    t.deepEqual([a.startMs, a.endMs, b.startMs, b.endMs], [0, 500, 500, 1000]);
+});
+
+test('lyrics: formatted text keeps its words and tokens LilyPond would misread are quoted', async t => {
+    const result = await convertSynthetic(syntheticScore(`<Measure><voice>
+  ${chord('quarter').replace('</Chord>', '<Lyrics><syllabic>single</syllabic><text><i>la</i></text></Lyrics></Chord>')}
+  ${chord('quarter').replace('</Chord>', lyric('*', 'single') + '</Chord>')}
+  ${chord('quarter').replace('</Chord>', lyric('1.', 'single') + '</Chord>')}
+  ${chord('quarter').replace('</Chord>', lyric('100%', 'single') + '</Chord>')}
+</voice></Measure>`));
+    t.false(result.score.includes('[object Object]'), result.score);
+    t.true(result.score.includes('la "*" "1." "100%"'), result.score);
+});
+
+test('tempo and labels: a <sym> inside formatting never leaks its id into text; empty labels render nothing', async t => {
+    const tempoResult = await convertSynthetic(tempoXml('<b><sym>metNoteQuarterUp</sym> = 90</b>'));
+    t.false(tempoResult.music.includes('metNoteQuarterUp'), tempoResult.music);
+    const markResult = await convertSynthetic(syntheticScore(`<Measure><voice>
+  <RehearsalMark><text></text></RehearsalMark><Rest><durationType>measure</durationType><duration>4/4</duration></Rest>
+</voice></Measure>`));
+    t.false(markResult.music.includes('\\box ""'), markResult.music);
+});
+
+test('parts: empty <trackName/> and <longName/> neither crash nor print [object Object]', async t => {
+    const xml = syntheticScore('<Measure><voice><Rest><durationType>measure</durationType><duration>4/4</duration></Rest></voice></Measure>')
+        .replace('<trackName>Solo</trackName>', '<trackName/>').replace('<longName>Solo</longName>', '<longName/>');
+    const result = await convertSynthetic(xml);
+    t.false(result.score.includes('[object Object]'), result.score);
+    t.true(/^part = \{/m.test(result.music), result.music);
+});
+
+const lyricChord = (type, text, extra = '') => chord(type, extra).replace('</Chord>', lyric(text, 'single') + '</Chord>');
+const tempoAt = (bpm, sym = 'metNoteQuarterUp') => `<Tempo><tempo>1</tempo><text><sym>${sym}</sym><font face="Edwin"/> = ${bpm}</text></Tempo>`;
+
+test('lyric timing: milliseconds accumulate across tempo changes', async t => {
+    const timings = await timingsOf(syntheticScore(`<Measure><voice>${tempoAt(60)}
+  ${lyricChord('quarter', 'a')}${lyricChord('quarter', 'b')}${lyricChord('quarter', 'c')}${lyricChord('quarter', 'd')}
+</voice></Measure><Measure><voice>${tempoAt(120)}${lyricChord('quarter', 'e')}<Rest><durationType>half</durationType><dots>1</dots></Rest></voice></Measure>`));
+    const lyrics = timings.Solo[0];
+    t.deepEqual(lyrics.map(l => [l.startMs, l.endMs]), [[0, 1000], [1000, 2000], [2000, 3000], [3000, 4000], [4000, 4500]]);
+});
+
+test('lyric timing: a text-only tempo mark keeps the running metronome tempo', async t => {
+    const timings = await timingsOf(syntheticScore(`<Measure><voice>${tempoAt(60)}
+  ${lyricChord('quarter', 'a')}<Rest><durationType>half</durationType><dots>1</dots></Rest>
+</voice></Measure><Measure><voice><Tempo><type>aTempo</type><text>a tempo</text></Tempo>${lyricChord('quarter', 'b')}<Rest><durationType>half</durationType><dots>1</dots></Rest></voice></Measure>`));
+    const [a, b] = timings.Solo[0];
+    t.deepEqual([a.endMs, b.startMs, b.endMs], [1000, 4000, 5000]);
+});
+
+test('lyric timing: the metronome note value scales the milliseconds (eighth = 120 is 1000 ms per quarter)', async t => {
+    const timings = await timingsOf(syntheticScore(`<Measure><voice>${tempoAt(120, 'metNoteEighthUp')}
+  ${lyricChord('quarter', 'a')}<Rest><durationType>half</durationType><dots>1</dots></Rest>
+</voice></Measure>`));
+    t.is(timings.Solo[0][0].endMs, 1000);
+});
+
+test('lyric timing: chords of another voice without lyrics do not lengthen a lyric', async t => {
+    const timings = await timingsOf(syntheticScore(`<Measure>
+  <voice>${lyricChord('quarter', 'a')}${lyricChord('quarter', 'b')}${lyricChord('quarter', 'c')}${lyricChord('quarter', 'd')}</voice>
+  <voice>${chord('half')}${chord('half')}</voice>
+</Measure>`));
+    const d = timings.Solo[0][3];
+    t.deepEqual([d.start, d.end], [3, 4]);
+});
+
+test('tempo: a metronome mark with the symbol nested in formatting still renders', async t => {
+    const result = await convertSynthetic(tempoXml('<b><sym>metNoteQuarterUp</sym> = 80</b>'));
+    t.true(result.music.includes('\\tempo 4 = 80'), result.music);
+});
+
+const hairpin = (kind, sub = 0) => kind === 'start'
+    ? `<Spanner type="HairPin"><HairPin><subtype>${sub}</subtype></HairPin><next><location><measures>1</measures></location></next></Spanner>`
+    : '<Spanner type="HairPin"><prev><location><measures>-1</measures></location></prev></Spanner>';
+
+test('hairpins: an end and the next start on the same note both survive, in order', async t => {
+    const result = await convertSynthetic(syntheticScore(`<Measure><voice>
+  ${hairpin('start', 0)}${chord('quarter')}${hairpin('end')}${hairpin('start', 1)}${chord('quarter')}${chord('quarter')}${hairpin('end')}${chord('quarter')}
+</voice></Measure>`));
+    t.regex(result.music, /\\<\s+\S+\\!\\>\s+\S+\s+\S+\\!/, result.music);
+});
+
+test('hairpins: a "cresc." line (subtype 2) is a crescendo', async t => {
+    const result = await convertSynthetic(syntheticScore(`<Measure><voice>${hairpin('start', 2)}${chord('whole')}</voice></Measure>`));
+    t.true(result.music.includes('\\<'), result.music);
+    t.false(result.music.includes('\\>'), result.music);
+});
+
+test('transposition: instruments sounding more than an octave lower (bass clarinet, tenor sax) convert', async t => {
+    const xml = syntheticScore('<Measure><voice><Rest><durationType>measure</durationType><duration>4/4</duration></Rest></voice></Measure>')
+        .replace('<instrumentId>test.solo</instrumentId>', '<transposeDiatonic>-8</transposeDiatonic><transposeChromatic>-14</transposeChromatic><instrumentId>test.solo</instrumentId>');
+    const result = await convertSynthetic(xml);
+    t.true(result.score.includes("\\transpose c d'"), result.score);
+});
+
+test('durations: breve and longa chords are written with their LilyPond durations and keep the bar whole', async t => {
+    const result = await convertSynthetic(syntheticScore(`<Measure><voice>${chord('breve')}</voice></Measure><Measure><voice>${chord('long')}</voice></Measure>`));
+    t.true(result.music.includes('\\breve'), result.music);
+    t.true(result.music.includes('\\longa'), result.music);
+});
+
+test('partial measures: an odd pickup length without content gets a multiplied spacer', async t => {
+    const result = await convertSynthetic(syntheticScore('<Measure len="5/8"><voice><KeySig><concertKey>0</concertKey></KeySig></voice></Measure>'));
+    t.true(result.music.includes('\\partial 8*5'), result.music);
+    t.true(result.music.includes('s8*5'), result.music);
+});
+
+test('parts: a part without a name is called "Part" in its book as well', async t => {
+    const xml = syntheticScore('<Measure><voice><Rest><durationType>measure</durationType><duration>4/4</duration></Rest></voice></Measure>')
+        .replace('<trackName>Solo</trackName>', '<trackName/>');
+    const result = await convertSynthetic(xml);
+    t.true(result.parts.includes('\\bookOutputSuffix "Part"'), result.parts);
+});
+
+test('lyric timing: a tempo mark in a later voice that sits earlier in the bar is still applied in time order', async t => {
+    const timings = await timingsOf(syntheticScore(`<Measure>
+  <voice>${lyricChord('quarter', 'a')}${tempoAt(120)}${lyricChord('quarter', 'b')}${lyricChord('quarter', 'c')}${lyricChord('quarter', 'd')}</voice>
+  <voice>${tempoAt(60)}<Rest><durationType>measure</durationType><duration>4/4</duration></Rest></voice>
+</Measure>`));
+    t.deepEqual(timings.Solo[0].map(l => [l.startMs, l.endMs]), [[0, 1000], [1000, 1500], [1500, 2000], [2000, 2500]]);
 });

@@ -80,12 +80,13 @@ export class XmlWrapper {
     }
 
     /**
-     * Returns all character data below this node in document order, formatting tags dropped.
+     * Returns all character data below this node in document order, formatting tags and <sym> dropped.
      * Needs the parser option `charsAsChildren: true`, which is what keeps the text in order.
      * @returns {string} the text content
      */
     get plainText() {
         const collect = (node) => {
+            if (node['#name'] === 'sym') return ''; // a symbol id such as accidentalFlat, not text
             if (!node.$$) return typeof node._ === 'string' ? node._ : '';
             return node.$$.map(collect).join('');
         };
