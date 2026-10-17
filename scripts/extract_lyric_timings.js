@@ -1,9 +1,9 @@
 import fs from 'fs';
 import xml2js from 'xml2js';
-import { renderLyricTimings } from './lib.js';
+import { renderLyricTimings } from '../lib.js';
 import admZip from 'adm-zip';
-import { XmlWrapper } from './xml_wrapper.js';
-import { detectVersion } from './compat.js';
+import { XmlWrapper } from '../xml_wrapper.js';
+import { detectVersion } from '../compat.js';
 
 const parser = new xml2js.Parser({ preserveChildrenOrder: true, explicitChildren: true });
 

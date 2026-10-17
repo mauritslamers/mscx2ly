@@ -14,7 +14,7 @@
     "lib.js",
     "xml_wrapper.js",
     "compat.js",
-    "extract_lyric_timings.js",
+    "scripts/extract_lyric_timings.js",
     "typings"
   ],
   "scripts": {
