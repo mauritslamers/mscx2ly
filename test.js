@@ -31,7 +31,7 @@ const convertFile = async (sourceFile, options = {}) => {
     } catch {
         source = readFileSync(sourceFile, 'utf8');
     }
-    const parser = new xml2js.Parser({ preserveChildrenOrder: true, explicitChildren: true });
+    const parser = new xml2js.Parser({ preserveChildrenOrder: true, explicitChildren: true, charsAsChildren: true });
     const json = await parser.parseStringPromise(source);
     const data = new XmlWrapper(json.museScore);
     // omitMusic/omitScore/omitParts are not renderingOptions understood by

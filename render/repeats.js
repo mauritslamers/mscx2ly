@@ -87,21 +87,29 @@ export const analyzeRepeats = (markers) => {
             const endings = [];
             let idx = i;
             let spanEnd = idx;
+            let lastEndRepeat = null;
             for (;;) {
                 const span = markers[idx].voltaStart.span || 1;
                 spanEnd = idx + span - 1;
                 const number = markers[idx].voltaStart.endings;
-                const hasEndRepeat = markers.slice(idx, spanEnd + 1).some(m => m.endRepeat);
+                const endRepeatMarker = markers.slice(idx, spanEnd + 1).find(m => m.endRepeat);
+                lastEndRepeat = endRepeatMarker ? endRepeatMarker.endRepeat : null;
                 endings.push({ startIndex: idx, endIndex: spanEnd, number });
-                if (!hasEndRepeat) break; // the last ending in the group carries no endRepeat
+                if (!lastEndRepeat) break; // the last ending in the group carries no endRepeat
                 idx = spanEnd + 1;
                 if (idx >= markers.length || !markers[idx].voltaStart) break;
             }
+            // MuseScore also tags the *last* ending with endRepeat (tests/repeats.mscz: a 3-ending
+            // group has "2" on all three), so only an endRepeat beyond the last ending's own number
+            // means another, unbracketed pass follows (e.g. a lone first ending).
+            const lastNumber = endings[endings.length - 1].number;
+            const finalPassUnbracketed = !!lastEndRepeat && parseInt(lastEndRepeat, 10) > lastNumber;
             regions.push({
                 startIndex: bodyStart,
                 bodyEndIndex: endings[0].startIndex - 1,
-                count: endings[endings.length - 1].number,
+                count: finalPassUnbracketed ? parseInt(lastEndRepeat, 10) : lastNumber,
                 endings,
+                ...(finalPassUnbracketed && { finalPassUnbracketed }),
             });
             i = spanEnd + 1;
             bodyStart = i;
@@ -161,6 +169,7 @@ export const applyRepeats = (measures, regions) => {
             const endingMeasures = measures.slice(ending.startIndex, ending.endIndex + 1);
             return `    { ${endingMeasures.join(' |\n      ')}\n    }`;
         });
+        if (region.finalPassUnbracketed) altBlocks.push('    { }');
         const alternative = `\\alternative {\n${altBlocks.join('\n')}\n  }`;
         const anchor = emptyBody ? region.startIndex : region.bodyEndIndex;
         out[anchor] = emptyBody

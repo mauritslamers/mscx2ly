@@ -48,7 +48,7 @@ export const mscx2ly = async ({
     let json;
     try {
         // convert to json
-        const parser = new xml2js.Parser({ preserveChildrenOrder : true, explicitChildren: true});
+        const parser = new xml2js.Parser({ preserveChildrenOrder : true, explicitChildren: true, charsAsChildren: true});
         json = await parser.parseStringPromise(source);
     }
     catch (e) {

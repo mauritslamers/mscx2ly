@@ -874,15 +874,6 @@ export const renderDynamic = (dynamic) => {
     return ret;
 }
 
-// Character data of an xml2js node without formatting tags. xml2js merges a node's direct
-// text into `_` (losing its position among child tags) and drops whitespace-only text between
-// tags, so child texts are space-joined and the direct text is appended last.
-const collectPlainText = (node) => {
-    const parts = (node.$$ || []).map(collectPlainText);
-    if (typeof node._ === 'string') parts.push(node._);
-    return parts.join(' ');
-}
-
 export const parseTempo = (tempoEvt) => {
     // this requires a bit of trickery
     /*
@@ -939,9 +930,8 @@ export const parseTempo = (tempoEvt) => {
             tempoValue = parseInt(tempoValue, 10);
         }
         else if (!textNode.get('sym')) {
-            // formatted free text such as <text><b>Allegro</b></text>, no metronome mark
-            const plain = collectPlainText(textNode.data).replace(/\s+/g, ' ').trim();
-            if (plain) tempoText = plain;
+            // formatted free text such as <text><b>Allegro</b></text>: keep the words, drop the formatting
+            tempoText = textNode.plainText.replace(/\s+/g, ' ').trim() || undefined;
         }
     }
     else if (textNode) {
@@ -1171,16 +1161,17 @@ export const renderMusicForStaff = (staff, formatVersion = LATEST_FORMAT_VERSION
             ctx.voiceIdx = voiceIdx;
 
             const annotated = annotateGraceNotes(annotateTuplets(voice));
-            return annotated.map(({ evt, tupletRatio, tupletPosition, graceType, graceGroupStart, graceGroupEnd }) => {
+            return annotated.map(({ evt, tupletRatio, tupletOpens, tupletCloses, graceType, graceGroupStart, graceGroupEnd }) => {
                 ctx.currentTupletRatio = tupletRatio;
                 ctx.isGraceNote = !!graceType;
                 const handler = eventHandlers[evt.name];
                 let rendered = (handler ? handler(evt, ctx) : '') ?? '';
-                if (tupletPosition === 'start' || tupletPosition === 'single') {
-                    rendered = `\\tuplet ${tupletRatio.actual}/${tupletRatio.normal} { ${rendered}`;
+                if (tupletOpens.length) {
+                    const opens = tupletOpens.map(r => `\\tuplet ${r.actual}/${r.normal} {`).join(' ');
+                    rendered = `${opens} ${rendered}`;
                 }
-                if (tupletPosition === 'end' || tupletPosition === 'single') {
-                    rendered = `${rendered} }`;
+                if (tupletCloses) {
+                    rendered = `${rendered} ${Array(tupletCloses).fill('}').join(' ')}`;
                 }
                 if (graceGroupStart) {
                     rendered = `${graceCommandFor(graceType)} { ${rendered}`;
@@ -1462,6 +1453,23 @@ const renderPart = (part, formatVersion, showBarNumbers = false, repeatRegions =
 }
 
 
+// Parts that share a (valid-identifier) name all get a running number appended
+// (flute -> flute1, flute2); unique names stay as they are. Totals are counted up
+// front so the first duplicate can be numbered before the second one is seen.
+const createPartNamer = (partsInfo) => {
+    const totals = {};
+    partsInfo.flatMap(p => p.isSection ? p.parts : [p]).forEach((p) => {
+        const base = createValidPartName(p.trackName);
+        totals[base] = (totals[base] || 0) + 1;
+    });
+    const counters = {};
+    return (part) => {
+        const base = createValidPartName(part.trackName);
+        counters[base] = (counters[base] || 0) + 1;
+        return totals[base] > 1 ? `${part.trackName}${counters[base]}` : part.trackName;
+    };
+};
+
 export const renderLilypond = (partsInfo, metaInfo, options = {}, formatVersion = LATEST_FORMAT_VERSION, repeatRegions = []) => {
     // there are two parts we are going to render
     // the parts music library, the score and possibly the parts (which can be part of the same file)
@@ -1470,20 +1478,7 @@ export const renderLilypond = (partsInfo, metaInfo, options = {}, formatVersion 
         scoreData: [], // in the score, the order does matter
         partData: {},
     };
-    // Parts that share a (valid-identifier) name all get a running number appended
-    // (flute -> flute1, flute2); unique names stay as they are. Totals are counted up
-    // front so the first duplicate can be numbered before the second one is seen.
-    const nameTotals = {};
-    partsInfo.flatMap(p => p.isSection ? p.parts : [p]).forEach((p) => {
-        const base = createValidPartName(p.trackName);
-        nameTotals[base] = (nameTotals[base] || 0) + 1;
-    });
-    const nameCounters = {};
-    const uniqueName = (part) => {
-        const base = createValidPartName(part.trackName);
-        nameCounters[base] = (nameCounters[base] || 0) + 1;
-        return nameTotals[base] > 1 ? `${part.trackName}${nameCounters[base]}` : part.trackName;
-    };
+    const uniqueName = createPartNamer(partsInfo);
     partsInfo.forEach((partInfo) => {
         if (partInfo.isSection) {
             const parts = partInfo.parts.map((part) => {
@@ -1644,51 +1639,24 @@ export const renderLyricTimings = (data ) => {
     // const metaInfo = parseMetaTag(Score.get('metaTag'));
     const { formatVersion } = detectVersion(data);
     const ret = {};
-    partsInfo.forEach((partInfo) => {
-        const curPart = ret[partInfo.trackName] = [];
-        if (partInfo.isSection) {
-            const parts = partInfo.parts.map((part, idx) => {
-                const renderedPart = renderPart(part, formatVersion.value);
-                renderedPart.lyricData.forEach((lyricData) => {
-                    lyricData.forEach(lyric => {
-                        if (!lyric.currentTempo || !lyric.currentTempo.tempoValue || !lyric.currentTempo.tempoSymbolValue) {
-                            lyric.startMs = null;
-                            lyric.endMs = null;
-                            return;
-                        }
-                        const beatPerSecond = lyric.currentTempo.tempoValue / 60;
-                        const factor = 4 / lyric.currentTempo.tempoSymbolValue;
-                        lyric.startMs = lyric.start * factor * beatPerSecond * 1000;
-                        lyric.endMs = lyric.end * factor * beatPerSecond * 1000;
-                    });
-                });
-                curPart.push(...renderedPart.lyricData);
-                return renderedPart;
-            })
-            // take the lyrics timing
-        }
-        else {
-            // not a section, but a part
-            const part = renderPart(partInfo, formatVersion.value);
-            part.lyricData.forEach((lyricData) => {
-                lyricData.forEach(lyric => {
-                    if (!lyric.currentTempo || !lyric.currentTempo.tempoValue || !lyric.currentTempo.tempoSymbolValue) {
-                        lyric.startMs = null;
-                        lyric.endMs = null;
-                        return;
-                    }
-                    const beatPerSecond = lyric.currentTempo.tempoValue / 60;
-                    const factor = 4 / lyric.currentTempo.tempoSymbolValue;
-                    lyric.startMs = lyric.start * factor * beatPerSecond * 1000;
-                    lyric.endMs = lyric.end * factor * beatPerSecond * 1000;
-                });
+    const uniqueName = createPartNamer(partsInfo);
+    partsInfo.flatMap(p => p.isSection ? p.parts : [p]).forEach((part) => {
+        const name = uniqueName(part);
+        const { lyricData } = renderPart(part, formatVersion.value, false, [], name);
+        lyricData.forEach((staffLyrics) => {
+            staffLyrics.forEach(lyric => {
+                if (!lyric.currentTempo || !lyric.currentTempo.tempoValue || !lyric.currentTempo.tempoSymbolValue) {
+                    lyric.startMs = null;
+                    lyric.endMs = null;
+                    return;
+                }
+                const beatPerSecond = lyric.currentTempo.tempoValue / 60;
+                const factor = 4 / lyric.currentTempo.tempoSymbolValue;
+                lyric.startMs = lyric.start * factor * beatPerSecond * 1000;
+                lyric.endMs = lyric.end * factor * beatPerSecond * 1000;
             });
-            curPart.push(...part.lyricData);
-
-            // what needs to be done:
-            // - match a part name
-            // - convert to ms from ticks
-        }   
+        });
+        ret[name] = lyricData;
     });
     return ret;
 }

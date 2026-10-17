@@ -1,46 +1,53 @@
 // Tuplet-span detection for mscx2ly's render pipeline.
 // See tickets/00-background.md for why this exists.
+import { getGraceType } from './graceNotes.js';
 
 /**
  * Walks one voice's filtered event array and returns a NEW array with the
- * Tuplet/endTuplet marker events removed, and every other event annotated
- * with the tuplet ratio it belongs to, if any — or null if not inside a tuplet.
+ * Tuplet/endTuplet marker events removed, and every other event annotated with:
+ * - tupletRatio: the combined ratio of all enclosing tuplets (null outside any),
+ * - tupletOpens: ratios of the tuplets that open on this event, outermost first,
+ * - tupletCloses: how many tuplets close after this event.
+ * Grace chords never carry opens/closes: they sit outside the tuplet's braces
+ * (a tuplet starting on a grace chord opens on the next ordinary event instead).
  *
  * @param {{ name: string, get: (name: string) => any }[]} voiceEvents
- * @returns {{ evt: object, tupletRatio: { actual: number, normal: number } | null, tupletPosition: 'start' | 'middle' | 'end' | 'single' | null }[]}
+ * @returns {{ evt: object, tupletRatio: { actual: number, normal: number } | null, tupletOpens: { actual: number, normal: number }[], tupletCloses: number }[]}
  */
 export function annotateTuplets(voiceEvents) {
     const result = [];
-    let current = null; // { actual, normal, memberCount }
+    const open = []; // tuplets currently enclosing the cursor, outermost first
+    let pendingOpens = [];
+    let lastOrdinary = null; // last non-grace annotated event, the one an endTuplet closes on
+    const combinedRatio = () => open.length
+        ? open.reduce((acc, r) => ({ actual: acc.actual * r.actual, normal: acc.normal * r.normal }), { actual: 1, normal: 1 })
+        : null;
     for (const evt of voiceEvents) {
         if (evt.name === 'Tuplet') {
-            if (current) {
-                console.warn('[mscx2ly] Nested tuplets are not supported; closing the outer tuplet early');
-            }
             const actual = parseInt(evt.get('actualNotes'), 10);
             const normal = parseInt(evt.get('normalNotes'), 10);
-            current = { actual: actual || 1, normal: normal || 1, memberCount: 0 };
+            const ratio = { actual: actual || 1, normal: normal || 1 };
+            open.push(ratio);
+            pendingOpens.push(ratio);
             continue;
         }
         if (evt.name === 'endTuplet') {
-            if (current && current.memberCount > 0) {
-                const last = result[result.length - 1];
-                // a one-event tuplet opens and closes on the same event
-                last.tupletPosition = last.tupletPosition === 'start' ? 'single' : 'end';
+            if (!open.length) continue;
+            if (pendingOpens.length) {
+                pendingOpens.pop(); // closed before any member arrived
+            } else if (lastOrdinary) {
+                lastOrdinary.tupletCloses += 1;
             }
-            current = null;
+            open.pop();
             continue;
         }
-        if (current) {
-            current.memberCount += 1;
-            result.push({
-                evt,
-                tupletRatio: { actual: current.actual, normal: current.normal },
-                tupletPosition: current.memberCount === 1 ? 'start' : 'middle',
-            });
-        } else {
-            result.push({ evt, tupletRatio: null, tupletPosition: null });
+        const entry = { evt, tupletRatio: combinedRatio(), tupletOpens: [], tupletCloses: 0 };
+        if (!getGraceType(evt)) {
+            entry.tupletOpens = pendingOpens;
+            pendingOpens = [];
+            lastOrdinary = entry;
         }
+        result.push(entry);
     }
     return result;
 }

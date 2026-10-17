@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'fs';
 import admZip from 'adm-zip';
 import xml2js from 'xml2js';
 import { XmlWrapper } from './xml_wrapper.js';
-import { convertMSCX2LY, renderBarLine, readOrderInfo, readStaffInfo, readPartsInfo, getEventHandlers, parseRest, renderRehearsalMark, renderTempo, renderStaffOpen } from './lib.js';
+import { convertMSCX2LY, renderLyricTimings, renderBarLine, readOrderInfo, readStaffInfo, readPartsInfo, getEventHandlers, parseRest, renderRehearsalMark, renderTempo, renderStaffOpen } from './lib.js';
 import { analyzeRepeats, mergeRepeatMarkers, applyRepeats } from './render/repeats.js';
 
 // ---------------------------------------------------------------------------
@@ -17,7 +17,7 @@ import { analyzeRepeats, mergeRepeatMarkers, applyRepeats } from './render/repea
 const hasFixture = (name) => existsSync(`tests/${name}`);
 const maybeTest = (name, title, impl) => (hasFixture(name) ? test : test.skip)(title, impl);
 
-const xmlParser = new xml2js.Parser({ preserveChildrenOrder: true, explicitChildren: true });
+const xmlParser = new xml2js.Parser({ preserveChildrenOrder: true, explicitChildren: true, charsAsChildren: true });
 
 const loadFile = (sourceFile) => {
     let source;
@@ -649,9 +649,9 @@ const tempoXml = (textXml) => syntheticScore(`<Measure><voice>
   <Rest><durationType>measure</durationType><duration>4/4</duration></Rest>
 </voice></Measure>`);
 
-test('parseTempo: formatted free text (<b>Allegro</b>) is extracted as tempo text', async t => {
-    const result = await convertSynthetic(tempoXml('<b>Allegro</b> con brio'));
-    t.true(result.music.includes('\\tempo "Allegro con brio"'), result.music);
+test('parseTempo: formatting inside free text is dropped and the words keep their order', async t => {
+    const result = await convertSynthetic(tempoXml('Molto <b>Allegro</b> con <i>brio</i>'));
+    t.true(result.music.includes('\\tempo "Molto Allegro con brio"'), result.music);
 });
 
 maybeTest('tempotests.mscz', 'tempotests: plain text, metronome and tempo primo marks render', async t => {
@@ -728,4 +728,76 @@ test('applyRepeats: a repeat whose first ending opens the region keeps the endin
     t.true(out[0].includes('{ end1\n    }'), out[0]);
     t.true(out[0].includes('{ end2\n    }'), out[0]);
     t.false(out[0].includes('undefined'));
+});
+
+test('analyzeRepeats: a lone first ending that still repeats keeps the repeat and adds an unbracketed final pass', t => {
+    const markers = [
+        marker({}),
+        marker({ endRepeat: '2', voltaStart: { endings: 1, span: 1 } }),
+        marker({}),
+    ];
+    const regions = analyzeRepeats(markers);
+    t.is(regions.length, 1);
+    t.is(regions[0].count, 2);
+    t.true(regions[0].finalPassUnbracketed);
+    const out = applyRepeats(['a', 'b', 'c'], regions);
+    t.is(out.length, 2, 'the trailing unbracketed measure stays outside the alternatives');
+    t.true(out[0].includes('\\repeat volta 2 {'));
+    t.true(out[0].includes('{ b\n    }\n    { }'), out[0]);
+    t.is(out[1], 'c');
+});
+
+test('tuplets: nested tuplets render balanced braces', async t => {
+    const result = await convertSynthetic(syntheticScore(`<Measure><voice>
+  <Tuplet actualNotes="3" normalNotes="2"/>
+  <Rest><durationType>eighth</durationType></Rest>
+  <Tuplet actualNotes="3" normalNotes="2"/>
+  <Rest><durationType>16th</durationType></Rest>
+  <Rest><durationType>16th</durationType></Rest>
+  <Rest><durationType>16th</durationType></Rest>
+  <endTuplet/>
+  <Rest><durationType>eighth</durationType></Rest>
+  <endTuplet/>
+  <Rest><durationType>quarter</durationType></Rest>
+</voice></Measure>`));
+    t.true(result.music.includes('\\tuplet 3/2 { r8 \\tuplet 3/2 { r16 r16 r16 } r8 }'), result.music);
+});
+
+test('tuplets: a tuplet starting on a grace chord keeps the tuplet outside the grace group', async t => {
+    const result = await convertSynthetic(syntheticScore(`<Measure><voice>
+  <Tuplet actualNotes="3" normalNotes="2"/>
+  <Chord><acciaccatura/><durationType>eighth</durationType><Note><pitch>60</pitch><tpc>14</tpc></Note></Chord>
+  <Chord><durationType>eighth</durationType><Note><pitch>62</pitch><tpc>16</tpc></Note></Chord>
+  <Chord><durationType>eighth</durationType><Note><pitch>64</pitch><tpc>18</tpc></Note></Chord>
+  <Chord><durationType>eighth</durationType><Note><pitch>65</pitch><tpc>13</tpc></Note></Chord>
+  <endTuplet/>
+  <Rest><durationType>quarter</durationType></Rest>
+</voice></Measure>`));
+    t.regex(result.music, /\\acciaccatura \{ [^}]*\} \\tuplet 3\/2 \{ [^}]*\}/, result.music);
+});
+
+test('renderLyricTimings: grouped parts are keyed by their own track names, not "undefined"', async t => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<museScore version="4.40">
+  <programVersion>4.4.3</programVersion>
+  <Score>
+    <metaTag name="workTitle">Synthetic</metaTag>
+    <Staff id="1"><Measure><voice><Rest><durationType>measure</durationType><duration>4/4</duration></Rest></voice></Measure></Staff>
+    <Staff id="2"><Measure><voice><Rest><durationType>measure</durationType><duration>4/4</duration></Rest></voice></Measure></Staff>
+    <Part>
+      <Staff><bracket type="0" span="2" col="0" visible="1"/><StaffType><name>stdNormal</name></StaffType></Staff>
+      <trackName>Soprano</trackName>
+      <Instrument><longName>Soprano</longName><shortName>S</shortName><instrumentId>voice.soprano</instrumentId><Channel><synti>Fluid</synti></Channel></Instrument>
+    </Part>
+    <Part>
+      <Staff><StaffType><name>stdNormal</name></StaffType></Staff>
+      <trackName>Alto</trackName>
+      <Instrument><longName>Alto</longName><shortName>A</shortName><instrumentId>voice.alto</instrumentId><Channel><synti>Fluid</synti></Channel></Instrument>
+    </Part>
+  </Score>
+</museScore>`;
+    const json = await xmlParser.parseStringPromise(xml);
+    const timings = renderLyricTimings(new XmlWrapper(json.museScore));
+    t.false('undefined' in timings, JSON.stringify(Object.keys(timings)));
+    t.true('Soprano' in timings || 'Alto' in timings, JSON.stringify(Object.keys(timings)));
 });

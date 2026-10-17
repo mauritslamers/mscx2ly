@@ -5,7 +5,7 @@ import admZip from 'adm-zip';
 import { XmlWrapper } from '../xml_wrapper.js';
 import { detectVersion } from '../compat.js';
 
-const parser = new xml2js.Parser({ preserveChildrenOrder: true, explicitChildren: true });
+const parser = new xml2js.Parser({ preserveChildrenOrder: true, explicitChildren: true, charsAsChildren: true });
 
 async function parseMuseScoreXML(sourceFile) {
     let source;
@@ -24,7 +24,7 @@ async function parseMuseScoreXML(sourceFile) {
     let json;
     try {
         // convert to json
-        const parser = new xml2js.Parser({ preserveChildrenOrder : true, explicitChildren: true});
+        const parser = new xml2js.Parser({ preserveChildrenOrder : true, explicitChildren: true, charsAsChildren: true});
         json = await parser.parseStringPromise(source);
     }
     catch (e) {

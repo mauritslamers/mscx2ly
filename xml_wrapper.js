@@ -13,6 +13,9 @@ I think it is easier to put something "on top". A class that we feed the data an
 */
 
 
+// With the xml2js option `charsAsChildren`, character data shows up in `$$` as `__text__` entries.
+const isElement = (child) => child['#name'] !== '__text__';
+
 export class XmlWrapper {
     constructor(data, parent = null) {
         this.data = data;
@@ -27,7 +30,7 @@ export class XmlWrapper {
         if (!this.hasChildren) {
             return null;
         }
-        return this.data.$$.map(child => new XmlWrapper(child, this));
+        return this.data.$$.filter(isElement).map(child => new XmlWrapper(child, this));
     }
 
     /**
@@ -73,7 +76,20 @@ export class XmlWrapper {
      * @returns {boolean} whether the current node has children
      */
     get hasChildren() {
-        return this.data.$$ !== undefined;
+        return this.data.$$ !== undefined && this.data.$$.some(isElement);
+    }
+
+    /**
+     * Returns all character data below this node in document order, formatting tags dropped.
+     * Needs the parser option `charsAsChildren: true`, which is what keeps the text in order.
+     * @returns {string} the text content
+     */
+    get plainText() {
+        const collect = (node) => {
+            if (!node.$$) return typeof node._ === 'string' ? node._ : '';
+            return node.$$.map(collect).join('');
+        };
+        return collect(this.data);
     }
 
     /**
