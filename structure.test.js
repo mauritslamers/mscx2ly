@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'fs';
 import admZip from 'adm-zip';
 import xml2js from 'xml2js';
 import { XmlWrapper } from './xml_wrapper.js';
-import { convertMSCX2LY, createValidPartName, renderLyricTimings, renderBarLine, readOrderInfo, readStaffInfo, readPartsInfo, getEventHandlers, parseRest, renderRehearsalMark, renderTempo, renderStaffOpen } from './lib.js';
+import { convertMSCX2LY, createValidPartName, createPartNamer, lilypondKeywords, musicIdentifiers, renderLyricTimings, renderBarLine, readOrderInfo, readStaffInfo, readPartsInfo, getEventHandlers, parseRest, renderRehearsalMark, renderTempo, renderStaffOpen } from './lib.js';
 import { findVoltaStart, analyzeRepeats, mergeRepeatMarkers, applyRepeats } from './render/repeats.js';
 
 // ---------------------------------------------------------------------------
@@ -888,4 +888,85 @@ test('parts: names that only differ in punctuation get distinct identifiers', as
     const defined = [...result.music.matchAll(/^(\w+) = \{/gm)].map(m => m[1]);
     t.is(new Set(defined).size, 2, result.music);
     defined.forEach(id => t.false(/^_|_$|__/.test(id), id));
+});
+
+// Randomised invariant check: whatever mix of names and staff counts a score has, every name,
+// music identifier, and book key must be unique and valid. Hand-picked cases kept missing the next variant.
+test('createPartNamer: names and music identifiers stay unique and valid for any mix of parts', t => {
+    let seed = 12345;
+    const rand = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+    const pool = ['Piano', 'Piano1', 'Piano 1', 'piano', 'PIANO', 'Piano2', 'Piano11', 'Flute', 'Flute1', 'Flute 1',
+        'Vln.', 'Vln', 'Vln 1', 'Violin I', 'Clarinet (Bb)', 'Soprano/Alto', '...', '', 'Part', 'Part1', 'Flûte',
+        'Drums', 'Drums1', 'DrumsPart', 'Lyrics', 'Tempo'];
+    const validId = /^[\p{L}\p{M}]+(_[\p{L}\p{M}]+)*$/u;
+    for (let run = 0; run < 2000; run++) {
+        const makePart = () => ({ trackName: pool[rand(pool.length)], staffs: new Array(1 + rand(3)) });
+        const partsInfo = Array.from({ length: 1 + rand(7) }, () => (
+            rand(4) === 0 ? { isSection: true, parts: Array.from({ length: 1 + rand(3) }, makePart) } : makePart()));
+        const nameFor = createPartNamer(partsInfo);
+        const names = new Set();
+        const ids = new Set();
+        let total = 0;
+        partsInfo.flatMap(p => p.isSection ? p.parts : [p]).forEach((part) => {
+            const name = nameFor(part);
+            const partIds = musicIdentifiers(name, part.staffs.length);
+            names.add(name.toLowerCase());
+            partIds.forEach(id => {
+                ids.add(id);
+                t.regex(id, validId, `invalid identifier "${id}" for "${name}"`);
+                t.false(lilypondKeywords.has(id), `"${id}" is a LilyPond keyword`);
+            });
+            total += partIds.length;
+        });
+        const parts = partsInfo.flatMap(p => p.isSection ? p.parts : [p]);
+        if (names.size !== parts.length || ids.size !== total) {
+            t.fail(`collision in ${JSON.stringify(parts.map(p => [p.trackName, p.staffs.length]))}`);
+            return;
+        }
+    }
+    t.pass();
+});
+
+test('voicing: a measure holding only an unsupported chord duration still gets a spacer', async t => {
+    const result = await convertSynthetic(syntheticScore(`<Measure><voice>
+  <Chord><durationType>1024th</durationType><Note><pitch>60</pitch><tpc>14</tpc></Note></Chord>
+</voice></Measure>
+<Measure><voice>
+  <Rest><durationType>measure</durationType><duration>4/4</duration></Rest>
+</voice></Measure>`));
+    t.true(result.music.includes('s1'), result.music);
+});
+
+test('createValidPartName: names that are LilyPond keywords get a suffix so the variable stays usable', t => {
+    t.is(createValidPartName('Drums'), 'drumsPart');
+    t.is(createValidPartName('Lyrics'), 'lyricsPart');
+    t.is(createValidPartName('Tempo'), 'tempoPart');
+    t.is(createValidPartName('Drums 2'), 'drumsTwo');
+});
+
+test('escaping: play-technique text, instrument names and titles cannot break out of their LilyPond string', async t => {
+    const xml = syntheticScore(`<Measure><voice>
+  <PlayTechAnnotation><text>pizz. "x"</text></PlayTechAnnotation>
+  <Chord><durationType>whole</durationType><Note><pitch>60</pitch><tpc>14</tpc></Note></Chord>
+</voice></Measure>`, [['Flute "I"', 1]]).replace('>Synthetic<', '>He said "hi"<');
+    const result = await convertSynthetic(xml);
+    t.true(result.music.includes('^\\markup { \\italic "pizz. \\"x\\"" }'), result.music);
+    t.true(result.score.includes('instrumentName = "Flute \\"I\\""'), result.score);
+    t.true(result.score.includes('title = "He said \\"hi\\""'), result.score);
+});
+
+test('escaping: a lyric word containing LilyPond syntax characters is quoted', async t => {
+    const result = await convertSynthetic(syntheticScore(`<Measure><voice>
+  <Chord><durationType>whole</durationType><Lyrics><syllabic>single</syllabic><text>a{b\\c</text></Lyrics><Note><pitch>60</pitch><tpc>14</tpc></Note></Chord>
+</voice></Measure>`));
+    t.true(result.score.includes('"a{b\\\\c"'), result.score);
+});
+
+test('parts: a part book with lyrics wraps the music in its voice and runs staff and lyrics together', async t => {
+    const result = await convertSynthetic(syntheticScore(`<Measure><voice>
+  <Chord><durationType>whole</durationType><Lyrics><syllabic>end</syllabic><text>la</text></Lyrics><Note><pitch>60</pitch><tpc>14</tpc></Note></Chord>
+</voice></Measure>`));
+    const book = result.parts;
+    t.true(/<<\s*\\new Staff \{[\s\S]*\\new Voice = "solo" \{\s*\\solo\s*\}[\s\S]*\\new Lyrics \\lyricsto "solo" \{[\s\S]*\}\s*>>/.test(book), book);
+    t.is((book.match(/\{/g) || []).length, (book.match(/\}/g) || []).length, 'unbalanced braces');
 });

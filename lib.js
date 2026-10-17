@@ -102,6 +102,15 @@ const durationMap = {
     "32nd": "32",   
 }
 
+// Words LilyPond refuses as variable names (checked against 2.24.3), e.g. a part called "Drums".
+export const lilypondKeywords = new Set([
+    'accepts', 'addlyrics', 'alias', 'alternative', 'book', 'bookpart', 'change', 'chordmode', 'chords',
+    'consists', 'context', 'default', 'defaultchild', 'denies', 'description', 'drummode', 'drums', 'etc',
+    'figuremode', 'figures', 'header', 'include', 'layout', 'lyricmode', 'lyrics', 'lyricsto', 'maininput',
+    'markup', 'markuplist', 'midi', 'name', 'new', 'notemode', 'override', 'paper', 'remove', 'repeat',
+    'rest', 'revert', 'score', 'sequential', 'set', 'simultaneous', 'tempo', 'type', 'unset', 'version', 'with',
+]);
+
 export const createValidPartName = (partName) => {
     // we need to make the partname a valid lilypond identifier
     // so we replace spaces with nothing, and make it lowercase
@@ -120,7 +129,8 @@ export const createValidPartName = (partName) => {
     // LilyPond only allows an underscore between letters, so runs of other characters
     // (e.g. "Vln.", "Clarinet (Bb)") collapse to one and never lead or trail the name
     validPartName = validPartName.replace(/[^\p{L}\p{M}]+/gu, '_').replace(/^_+|_+$/g, '');
-    return validPartName || 'part';
+    validPartName = validPartName || 'part';
+    return lilypondKeywords.has(validPartName) ? `${validPartName}Part` : validPartName;
 }
 
 
@@ -779,11 +789,11 @@ export const renderFermata = (fermata) => {
 
 const escapeLilyString = (text) => String(text ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 
+// <text> comes back as a node (formatted or not) with forceChild, as a plain string otherwise.
+const plainTextOf = (text) => (typeof text === 'string' ? text : text?.plainText);
+
 export const renderRehearsalMark = (mark) => {
-    // formatted labels (<text><b>A</b></text>) come back as a node, plain ones as a string
-    const text = mark.get('text', true);
-    const label = typeof text === 'string' ? text : text?.plainText;
-    return `\\mark \\markup { \\box "${escapeLilyString(label)}" }`;
+    return `\\mark \\markup { \\box "${escapeLilyString(plainTextOf(mark.get('text', true)))}" }`;
 }
 
 export const renderHairPin = (spanner) => {
@@ -1083,7 +1093,7 @@ function handleRehearsalMark(evt) {
 }
 
 function handlePlayTechAnnotation(evt, ctx) {
-    const text = `^\\markup { \\italic ${evt.get('text')} }`;
+    const text = `^\\markup { \\italic "${escapeLilyString(plainTextOf(evt.get('text', true)))}" }`;
     ctx.voiceConsumer.set('text', text);
 }
 
@@ -1196,8 +1206,13 @@ export const renderMusicForStaff = (staff, formatVersion = LATEST_FORMAT_VERSION
         // voice, or genuine polyphony — decided from the parsed data, not by
         // inspecting the rendered strings.
         const voicingDecision = analyzeVoicing(voices);
+        // A chord can be musical yet render to nothing (e.g. an unsupported duration); such a
+        // measure still needs the spacer so bar checks and timing stay aligned.
+        const musicalIdxs = voicingDecision.type === 'single' ? [voicingDecision.voiceIdx]
+            : voicingDecision.type === 'parallel' ? voicingDecision.voiceIdxs : [];
+        const rendersMusic = musicalIdxs.some((idx) => parsedVoices[idx] && parsedVoices[idx].trim());
         let body;
-        if (voicingDecision.type === 'empty') {
+        if (voicingDecision.type === 'empty' || !rendersMusic) {
             // Emit a spacer rest so bar checks remain valid in LilyPond and
             // currentTime stays aligned for subsequent lyric timing. Any
             // structural-only text (e.g. a lone KeySig with no notes) is
@@ -1348,12 +1363,12 @@ const renderLyrics = (lyrics) => {
         if (typeof lyricText !== 'string') {
             lyricText = lyricText == null ? '' : String(lyricText);
         }
-        if (lyricText.includes('"')) {
-            lyricText = lyricText.replace(/"/g, '\\"');
-            lyricText = `"${lyricText}"`;
+        // characters with a meaning of their own in lyricmode need the word quoted
+        if (/["\\{}$#~_\s]/.test(lyricText)) {
+            lyricText = `"${escapeLilyString(lyricText)}"`;
         }
         ret.push(lyricText);
-        if (lyric.syllabic && lyric.syllabic !== 'end') {
+        if (lyric.syllabic && lyric.syllabic !== 'end' && lyric.syllabic !== 'single') {
             ret.push('--');
         }
     }
@@ -1388,8 +1403,8 @@ const renderPart = (part, formatVersion, showBarNumbers = false, repeatRegions =
         // we need to abstract the data for the staffs first
         // because we need the names of the macros
         let tmpScoreData = "\\new PianoStaff <<\n";
-        tmpScoreData += `    \\set PianoStaff.instrumentName = "${longName}"\n`;
-        tmpScoreData += `    \\set PianoStaff.shortInstrumentName = "${shortName}"\n`;
+        tmpScoreData += `    \\set PianoStaff.instrumentName = "${escapeLilyString(longName)}"\n`;
+        tmpScoreData += `    \\set PianoStaff.shortInstrumentName = "${escapeLilyString(shortName)}"\n`;
         renderedStaffs.forEach((staff, idx) => {
             const partDataName = musicIdentifiers(partName, part.staffs.length)[idx];
             ret.musicData[`${partDataName}`] = staff.measures;
@@ -1414,8 +1429,8 @@ const renderPart = (part, formatVersion, showBarNumbers = false, repeatRegions =
         const clefname = renderClef(part.staffs[0].defaultClef);
         // render the score contents for the Score 
         let tmpScoreData = `  ${renderStaffOpen(part.staffs[0].lineCount)}`;
-        tmpScoreData += `    \\set Staff.instrumentName = "${longName}"\n`;
-        tmpScoreData += `    \\set Staff.shortInstrumentName = "${shortName}"\n`;
+        tmpScoreData += `    \\set Staff.instrumentName = "${escapeLilyString(longName)}"\n`;
+        tmpScoreData += `    \\set Staff.shortInstrumentName = "${escapeLilyString(shortName)}"\n`;
         tmpScoreData += `    ${clefname} \n`;
         if (staffHasLyrics) {
             tmpScoreData += `     \\new Voice = "${partDataName}" {\n`;
@@ -1437,19 +1452,18 @@ const renderPart = (part, formatVersion, showBarNumbers = false, repeatRegions =
         // render the score contents for sthe separate part
         let tmpPartData = renderStaffOpen(part.staffs[0].lineCount);
         if (transposition) tmpPartData += `    \\transpose ${transposition} { \n`;
-        tmpPartData +=  `${clefname} \n   \\${partDataName } \n`;
-        if (staffHasLyrics) {
-            tmpPartData += `     \\new Voice = ${partDataName} {\n`;
-        }
+        tmpPartData += `${clefname} \n`;
+        if (staffHasLyrics) tmpPartData += `     \\new Voice = "${partDataName}" {\n`;
+        tmpPartData += `   \\${partDataName } \n`;
+        if (staffHasLyrics) tmpPartData += `     }\n`;
         if (transposition) tmpPartData += `    }\n`;
-        if (staffHasLyrics) {
-            tmpScoreData += `     }\n`;
-        }
         tmpPartData += `}\n`;
         if (staffHasLyrics) {
             tmpPartData += `   \\new Lyrics \\lyricsto "${partDataName}" { \n `;
             // write out lyrics
             tmpPartData += `      ${renderLyrics(renderedStaff.lyrics)} \n   } \n`;
+            // staff and lyrics must run simultaneously inside the part's \score
+            tmpPartData = `<<\n${tmpPartData}>>\n`;
         }
 
         ret.partData[partName] = tmpPartData;
@@ -1460,43 +1474,50 @@ const renderPart = (part, formatVersion, showBarNumbers = false, repeatRegions =
 
 
 // The music identifiers a part defines: one per staff, numbered when it has several.
-const musicIdentifiers = (partName, staffCount) => staffCount > 1
+export const musicIdentifiers = (partName, staffCount) => staffCount > 1
     ? Array.from({ length: staffCount }, (_, i) => createValidPartName(`${partName}${i + 1}`))
     : [createValidPartName(partName)];
 
-// Gives every part a name whose music identifiers are unique across the whole score.
+// Gives every part a name that is unique in every place it is used: the music identifiers
+// (one per staff), the part book key / output suffix, and the lyric timing key.
 // Parts that share a (valid-identifier) name all get a running number appended
-// (flute -> flute1, flute2); other parts keep their name unless one of their identifiers
-// is already used by another part (e.g. a two-staff "Piano" and a part named "Piano1").
-const createPartNamer = (partsInfo) => {
+// (flute -> flute1, flute2); other parts keep their name unless it, or one of their
+// identifiers, is already used by another part (e.g. a two-staff "Piano" and a part named "Piano1").
+export const createPartNamer = (partsInfo) => {
     const parts = partsInfo.flatMap(p => p.isSection ? p.parts : [p]);
+    const nameOf = (part) => part.trackName ?? '';
     const totals = {};
     parts.forEach((p) => {
-        const base = createValidPartName(p.trackName);
+        const base = createValidPartName(nameOf(p));
         totals[base] = (totals[base] || 0) + 1;
     });
-    const taken = new Set();
-    const isFree = (ids) => ids.every((id) => !taken.has(id));
+    const takenIds = new Set();
+    const takenNames = new Set(); // lowercase: the names end up in file names
+    const isFree = (name, ids) => !takenNames.has(name.toLowerCase()) && ids.every((id) => !takenIds.has(id));
+    const claim = (name, ids) => {
+        takenNames.add(name.toLowerCase());
+        ids.forEach((id) => takenIds.add(id));
+    };
     // reserved up front so generated numbers can never take a name another part really has
     const keepsName = new Set();
     parts.forEach((part) => {
-        if (totals[createValidPartName(part.trackName)] !== 1) return;
-        const ids = musicIdentifiers(part.trackName, part.staffs.length);
-        if (!isFree(ids)) return;
-        ids.forEach((id) => taken.add(id));
+        if (totals[createValidPartName(nameOf(part))] !== 1) return;
+        const ids = musicIdentifiers(nameOf(part), part.staffs.length);
+        if (!isFree(nameOf(part), ids)) return;
+        claim(nameOf(part), ids);
         keepsName.add(part);
     });
     const counters = {};
     return (part) => {
-        if (keepsName.has(part)) return part.trackName;
-        const base = createValidPartName(part.trackName);
+        if (keepsName.has(part)) return nameOf(part);
+        const base = createValidPartName(nameOf(part));
         let name, ids;
         do {
             counters[base] = (counters[base] || 0) + 1;
-            name = `${part.trackName}${counters[base]}`;
+            name = `${nameOf(part)}${counters[base]}`;
             ids = musicIdentifiers(name, part.staffs.length);
-        } while (!isFree(ids));
-        ids.forEach((id) => taken.add(id));
+        } while (!isFree(name, ids));
+        claim(name, ids);
         return name;
     };
 };
@@ -1556,27 +1577,27 @@ export const renderLilypond = (partsInfo, metaInfo, options = {}, formatVersion 
     Object.keys(data.partData).forEach((key) => {
         parts += "\\book {\n";
         if (options.partsPaperSize) {
-            parts += ` \\paper {\n   #(set-paper-size "${options.partsPaperSize}")\n }\n`;
+            parts += ` \\paper {\n   #(set-paper-size "${escapeLilyString(options.partsPaperSize)}")\n }\n`;
         }
-        parts += `  \\bookOutputSuffix "${key}"\n`;
+        parts += `  \\bookOutputSuffix "${escapeLilyString(key)}"\n`;
         parts += `  \\header {\n`;
         if (metaInfo.workTitle) {
-            parts += `    title = "${metaInfo.workTitle}"\n`;
+            parts += `    title = "${escapeLilyString(metaInfo.workTitle)}"\n`;
         }   
         if (metaInfo.subtitle) {
-            parts += `    subtitle = "${metaInfo.subtitle}"\n`;
+            parts += `    subtitle = "${escapeLilyString(metaInfo.subtitle)}"\n`;
         }
         if (metaInfo.composer) {
-            parts += `    composer = "${metaInfo.composer}"\n`;
+            parts += `    composer = "${escapeLilyString(metaInfo.composer)}"\n`;
         }
         if (metaInfo.lyricist) {
-            parts += `    lyricist = "${metaInfo.lyricist}"\n`;
+            parts += `    lyricist = "${escapeLilyString(metaInfo.lyricist)}"\n`;
         }
         if (metaInfo.arranger) {
-            parts += `    arranger = "${metaInfo.arranger}"\n`;
+            parts += `    arranger = "${escapeLilyString(metaInfo.arranger)}"\n`;
         }
         // instrument name
-        parts += `    instrument = "${key}"\n`;
+        parts += `    instrument = "${escapeLilyString(key)}"\n`;
         parts += "  }\n";
         parts += "  \\score {\n"
         parts += `     ${data.partData[key]}\n`
@@ -1591,23 +1612,23 @@ export const renderLilypond = (partsInfo, metaInfo, options = {}, formatVersion 
 
     let score = "\\book {\n";
     if (options.scorePaperSize) {
-        score += ` \\paper {\n   #(set-paper-size "${options.scorePaperSize}")\n }\n`;
+        score += ` \\paper {\n   #(set-paper-size "${escapeLilyString(options.scorePaperSize)}")\n }\n`;
     }
     score += `  \\header {\n`;
     if (metaInfo.workTitle) {
-        score += `    title = "${metaInfo.workTitle}"\n`;
+        score += `    title = "${escapeLilyString(metaInfo.workTitle)}"\n`;
     }   
     if (metaInfo.subtitle) {
-        score += `    subtitle = "${metaInfo.subtitle}"\n`;
+        score += `    subtitle = "${escapeLilyString(metaInfo.subtitle)}"\n`;
     }
     if (metaInfo.composer) {
-        score += `    composer = "${metaInfo.composer}"\n`;
+        score += `    composer = "${escapeLilyString(metaInfo.composer)}"\n`;
     }
     if (metaInfo.lyricist) {
-        score += `    lyricist = "${metaInfo.lyricist}"\n`;
+        score += `    lyricist = "${escapeLilyString(metaInfo.lyricist)}"\n`;
     }
     if (metaInfo.arranger) {
-        score += `    arranger = "${metaInfo.arranger}"\n`;
+        score += `    arranger = "${escapeLilyString(metaInfo.arranger)}"\n`;
     }
     score += "  }\n";
     score += "  \\score { <<\n";
