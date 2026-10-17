@@ -1,3 +1,5 @@
+import xml2js from 'xml2js';
+
 // we need to prepare the data for the conversion
 // main issue is that the order of children in the xml is important
 // the xml2js library allows preserving the order, but the output needs parsing
@@ -155,4 +157,11 @@ export class XmlWrapper {
     }
 }
 
-
+// The parser every entry point must use: XmlWrapper.plainText needs the text nodes
+// (charsAsChildren), including whitespace-only ones between formatting tags (includeWhiteChars).
+export const createXmlParser = () => new xml2js.Parser({
+    preserveChildrenOrder: true,
+    explicitChildren: true,
+    charsAsChildren: true,
+    includeWhiteChars: true,
+});

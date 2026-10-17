@@ -1,11 +1,9 @@
 import fs from 'fs';
-import xml2js from 'xml2js';
 import { renderLyricTimings } from '../lib.js';
 import admZip from 'adm-zip';
-import { XmlWrapper } from '../xml_wrapper.js';
+import { XmlWrapper, createXmlParser } from '../xml_wrapper.js';
 import { detectVersion } from '../compat.js';
 
-const parser = new xml2js.Parser({ preserveChildrenOrder: true, explicitChildren: true, charsAsChildren: true });
 
 async function parseMuseScoreXML(sourceFile) {
     let source;
@@ -24,7 +22,7 @@ async function parseMuseScoreXML(sourceFile) {
     let json;
     try {
         // convert to json
-        const parser = new xml2js.Parser({ preserveChildrenOrder : true, explicitChildren: true, charsAsChildren: true});
+        const parser = createXmlParser();
         json = await parser.parseStringPromise(source);
     }
     catch (e) {

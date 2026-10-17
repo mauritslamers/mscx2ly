@@ -4,8 +4,7 @@ import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import admZip from 'adm-zip';
-import xml2js from 'xml2js';
-import { XmlWrapper } from './xml_wrapper.js';
+import { XmlWrapper, createXmlParser } from './xml_wrapper.js';
 import { convertMSCX2LY, createValidPartName, createPartNamer, lilypondKeywords, isReservedIdentifier, musicIdentifiers, renderLyricTimings, renderBarLine, readOrderInfo, readStaffInfo, readPartsInfo, getEventHandlers, parseRest, renderRehearsalMark, renderTempo, renderStaffOpen } from './lib.js';
 import { findVoltaStart, analyzeRepeats, mergeRepeatMarkers, applyRepeats } from './render/repeats.js';
 
@@ -20,7 +19,7 @@ import { findVoltaStart, analyzeRepeats, mergeRepeatMarkers, applyRepeats } from
 const hasFixture = (name) => existsSync(`tests/${name}`);
 const maybeTest = (name, title, impl) => (hasFixture(name) ? test : test.skip)(title, impl);
 
-const xmlParser = new xml2js.Parser({ preserveChildrenOrder: true, explicitChildren: true, charsAsChildren: true });
+const xmlParser = createXmlParser();
 
 const loadFile = (sourceFile) => {
     let source;
@@ -1254,4 +1253,18 @@ test('lyric timing: a tempo mark in a later voice that sits earlier in the bar i
   <voice>${tempoAt(60)}<Rest><durationType>measure</durationType><duration>4/4</duration></Rest></voice>
 </Measure>`));
     t.deepEqual(timings.Solo[0].map(l => [l.startMs, l.endMs]), [[0, 1000], [1000, 1500], [1500, 2000], [2000, 2500]]);
+});
+
+test('whitespace between adjacent formatting tags survives in tempo text, lyrics and instrument names', async t => {
+    const tempo = await convertSynthetic(tempoXml('<b>Molto</b> <i>Allegro</i>'));
+    t.true(tempo.music.includes('\\tempo "Molto Allegro"'), tempo.music);
+
+    const lyrics = await convertSynthetic(syntheticScore(`<Measure><voice>
+  <Chord><durationType>whole</durationType><Lyrics><syllabic>single</syllabic><text><b>Mol</b> <i>to</i></text></Lyrics><Note><pitch>60</pitch><tpc>14</tpc></Note></Chord>
+</voice></Measure>`));
+    t.true(lyrics.score.includes('"Mol to"'), lyrics.score);
+
+    const named = await convertSynthetic(syntheticScore('<Measure><voice><Rest><durationType>measure</durationType><duration>4/4</duration></Rest></voice></Measure>')
+        .replace('<longName>Solo</longName>', '<longName><b>Solo</b> <i>Flute</i></longName>'));
+    t.true(named.score.includes('instrumentName = "Solo Flute"'), named.score);
 });

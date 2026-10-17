@@ -1,8 +1,7 @@
 import test from 'ava';
 import { existsSync, readFileSync } from 'fs';
 import admZip from 'adm-zip';
-import xml2js from 'xml2js';
-import { XmlWrapper } from './xml_wrapper.js';
+import { XmlWrapper, createXmlParser } from './xml_wrapper.js';
 import { convertMSCX2LY } from './lib.js';
 
 // ---------------------------------------------------------------------------
@@ -31,7 +30,7 @@ const convertFile = async (sourceFile, options = {}) => {
     } catch {
         source = readFileSync(sourceFile, 'utf8');
     }
-    const parser = new xml2js.Parser({ preserveChildrenOrder: true, explicitChildren: true, charsAsChildren: true });
+    const parser = createXmlParser();
     const json = await parser.parseStringPromise(source);
     const data = new XmlWrapper(json.museScore);
     // omitMusic/omitScore/omitParts are not renderingOptions understood by

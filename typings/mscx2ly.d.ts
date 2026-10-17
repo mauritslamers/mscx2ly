@@ -628,6 +628,7 @@ class XmlWrapper {
     parent: XmlWrapper; // the parent of the current node
     data: object; // the data of the current node
     constructor(data: object, parent: XmlWrapper);
-    get (name: string): XmlWrapper; // get children by name
+    get (name: string, forceChild?: boolean): XmlWrapper; // get children by name; forceChild keeps a single text child a node
+    get plainText(): string; // all text below the node in document order, formatting and <sym> dropped (parser needs charsAsChildren + includeWhiteChars, see createXmlParser)
     get keys(): { [key:string]: any }; // get the keys of the current node
 }

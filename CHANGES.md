@@ -1,5 +1,5 @@
 - 0.1.12
-    - repeat structures: volta brackets, D.C./D.S., codas
+    - repeat structures: repeat barlines and volta endings
     - grace notes, staff groupings and staff lines
     - tuplets and improved polyphonic voicing
     - tempo and rehearsal marks

@@ -1,7 +1,6 @@
 import { convertMSCX2LY } from './lib.js';
 import fs from 'fs';
-import xml2js from 'xml2js';
-import { XmlWrapper } from './xml_wrapper.js';
+import { XmlWrapper, createXmlParser } from './xml_wrapper.js';
 import admZip from 'adm-zip';
 import { detectVersion } from './compat.js';
 
@@ -48,7 +47,7 @@ export const mscx2ly = async ({
     let json;
     try {
         // convert to json
-        const parser = new xml2js.Parser({ preserveChildrenOrder : true, explicitChildren: true, charsAsChildren: true});
+        const parser = createXmlParser();
         json = await parser.parseStringPromise(source);
     }
     catch (e) {
