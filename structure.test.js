@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'fs';
 import admZip from 'adm-zip';
 import xml2js from 'xml2js';
 import { XmlWrapper } from './xml_wrapper.js';
-import { convertMSCX2LY, renderLyricTimings, renderBarLine, readOrderInfo, readStaffInfo, readPartsInfo, getEventHandlers, parseRest, renderRehearsalMark, renderTempo, renderStaffOpen } from './lib.js';
+import { convertMSCX2LY, createValidPartName, renderLyricTimings, renderBarLine, readOrderInfo, readStaffInfo, readPartsInfo, getEventHandlers, parseRest, renderRehearsalMark, renderTempo, renderStaffOpen } from './lib.js';
 import { findVoltaStart, analyzeRepeats, mergeRepeatMarkers, applyRepeats } from './render/repeats.js';
 
 // ---------------------------------------------------------------------------
@@ -833,4 +833,59 @@ test('parts: a generated number never reuses the name of a part that already has
     t.true(result.music.includes('fluteTwo = {'), result.music);
     t.true(result.music.includes('fluteThree = {'), result.music);
     ['Flute1', 'Flute2', 'Flute3'].forEach(n => t.true(result.parts.includes(`\\bookOutputSuffix "${n}"`), n));
+});
+
+test('renderRehearsalMark: a formatted label (<b>A</b>) renders its text, not [object Object]', async t => {
+    const result = await convertSynthetic(syntheticScore(`<Measure><voice>
+  <RehearsalMark><text><b>A</b></text></RehearsalMark>
+  <Rest><durationType>measure</durationType><duration>4/4</duration></Rest>
+</voice></Measure>`));
+    t.true(result.music.includes('\\mark \\markup { \\box "A" }'), result.music);
+});
+
+test('parts: staff identifiers of a multi-staff part never collide with another part\'s name', async t => {
+    const rest = '<Measure><voice><Rest><durationType>measure</durationType><duration>4/4</duration></Rest></voice></Measure>';
+    const part = (name, staffCount) => `<Part>
+      ${'<Staff><StaffType><name>stdNormal</name></StaffType></Staff>'.repeat(staffCount)}
+      <trackName>${name}</trackName>
+      <Instrument><longName>${name}</longName><shortName>P</shortName><instrumentId>keyboard.piano</instrumentId><Channel><synti>Fluid</synti></Channel></Instrument>
+    </Part>`;
+    const result = await convertSynthetic(`<?xml version="1.0" encoding="UTF-8"?>
+<museScore version="4.40">
+  <programVersion>4.4.3</programVersion>
+  <Score>
+    <metaTag name="workTitle">Synthetic</metaTag>
+    <metaTag name="movementTitle">Synthetic Movement</metaTag>
+    <Staff id="1">${rest}</Staff><Staff id="2">${rest}</Staff><Staff id="3">${rest}</Staff>
+    ${part('Piano', 2)}
+    ${part('Piano1', 1)}
+  </Score>
+</museScore>`);
+    const defined = [...result.music.matchAll(/^(\w+) = \{/gm)].map(m => m[1]);
+    t.is(defined.length, 3, result.music);
+    t.is(new Set(defined).size, 3, `duplicate identifiers: ${defined}`);
+    defined.forEach(id => t.true(result.score.includes(`\\${id}`), `${id} not used in score`));
+});
+
+test('createValidPartName: punctuation becomes a single inner underscore, never leading or trailing', t => {
+    t.is(createValidPartName('Violin 1'), 'violinOne');
+    t.is(createValidPartName('Vln.'), 'vln');
+    t.is(createValidPartName('Clarinet (Bb)'), 'clarinet_bb');
+    t.is(createValidPartName('Soprano/Alto'), 'soprano_alto');
+    t.is(createValidPartName('A.S. 2'), 'a_s_Two');
+    t.is(createValidPartName('Flûte'), 'flûte');
+});
+
+test('createValidPartName: a name without any letters still gives a usable identifier', t => {
+    t.is(createValidPartName('...'), 'part');
+    t.is(createValidPartName(''), 'part');
+});
+
+test('parts: names that only differ in punctuation get distinct identifiers', async t => {
+    const result = await convertSynthetic(syntheticScore(
+        '<Measure><voice><Rest><durationType>measure</durationType><duration>4/4</duration></Rest></voice></Measure>',
+        [['Vln.', 1], ['Vln', 2]]));
+    const defined = [...result.music.matchAll(/^(\w+) = \{/gm)].map(m => m[1]);
+    t.is(new Set(defined).size, 2, result.music);
+    defined.forEach(id => t.false(/^_|_$|__/.test(id), id));
 });

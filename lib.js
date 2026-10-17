@@ -117,7 +117,10 @@ export const createValidPartName = (partName) => {
     validPartName = validPartName.replace(/7/g, 'Seven');
     validPartName = validPartName.replace(/8/g, 'Eight');
     validPartName = validPartName.replace(/9/g, 'Nine');
-    return validPartName;
+    // LilyPond only allows an underscore between letters, so runs of other characters
+    // (e.g. "Vln.", "Clarinet (Bb)") collapse to one and never lead or trail the name
+    validPartName = validPartName.replace(/[^\p{L}\p{M}]+/gu, '_').replace(/^_+|_+$/g, '');
+    return validPartName || 'part';
 }
 
 
@@ -777,7 +780,10 @@ export const renderFermata = (fermata) => {
 const escapeLilyString = (text) => String(text ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 
 export const renderRehearsalMark = (mark) => {
-    return `\\mark \\markup { \\box "${escapeLilyString(mark.get('text'))}" }`;
+    // formatted labels (<text><b>A</b></text>) come back as a node, plain ones as a string
+    const text = mark.get('text', true);
+    const label = typeof text === 'string' ? text : text?.plainText;
+    return `\\mark \\markup { \\box "${escapeLilyString(label)}" }`;
 }
 
 export const renderHairPin = (spanner) => {
@@ -1385,7 +1391,7 @@ const renderPart = (part, formatVersion, showBarNumbers = false, repeatRegions =
         tmpScoreData += `    \\set PianoStaff.instrumentName = "${longName}"\n`;
         tmpScoreData += `    \\set PianoStaff.shortInstrumentName = "${shortName}"\n`;
         renderedStaffs.forEach((staff, idx) => {
-            const partDataName = createValidPartName(`${partName}${idx+1}`);
+            const partDataName = musicIdentifiers(partName, part.staffs.length)[idx];
             ret.musicData[`${partDataName}`] = staff.measures;
             const clefname = renderClef(staff.defaultClef);
             tmpScoreData += renderStaffOpen(part.staffs[idx].lineCount);
@@ -1403,7 +1409,7 @@ const renderPart = (part, formatVersion, showBarNumbers = false, repeatRegions =
     else {
         const renderedStaff = renderStaff(part.staffs[0], formatVersion, showBarNumbers, repeatRegions);
         const staffHasLyrics = renderedStaff.lyrics && renderedStaff.lyrics.length;
-        const partDataName = createValidPartName(partName);
+        const partDataName = musicIdentifiers(partName, 1)[0];
         ret.musicData[partDataName] = renderedStaff.measures;
         const clefname = renderClef(part.staffs[0].defaultClef);
         // render the score contents for the Score 
@@ -1453,27 +1459,44 @@ const renderPart = (part, formatVersion, showBarNumbers = false, repeatRegions =
 }
 
 
+// The music identifiers a part defines: one per staff, numbered when it has several.
+const musicIdentifiers = (partName, staffCount) => staffCount > 1
+    ? Array.from({ length: staffCount }, (_, i) => createValidPartName(`${partName}${i + 1}`))
+    : [createValidPartName(partName)];
+
+// Gives every part a name whose music identifiers are unique across the whole score.
 // Parts that share a (valid-identifier) name all get a running number appended
-// (flute -> flute1, flute2); unique names stay as they are. Totals are counted up
-// front so the first duplicate can be numbered before the second one is seen.
+// (flute -> flute1, flute2); other parts keep their name unless one of their identifiers
+// is already used by another part (e.g. a two-staff "Piano" and a part named "Piano1").
 const createPartNamer = (partsInfo) => {
+    const parts = partsInfo.flatMap(p => p.isSection ? p.parts : [p]);
     const totals = {};
-    partsInfo.flatMap(p => p.isSection ? p.parts : [p]).forEach((p) => {
+    parts.forEach((p) => {
         const base = createValidPartName(p.trackName);
         totals[base] = (totals[base] || 0) + 1;
     });
-    // generated numbers skip identifiers already taken, e.g. by a part really named "Flute1"
-    const taken = new Set(Object.keys(totals).filter((base) => totals[base] === 1));
+    const taken = new Set();
+    const isFree = (ids) => ids.every((id) => !taken.has(id));
+    // reserved up front so generated numbers can never take a name another part really has
+    const keepsName = new Set();
+    parts.forEach((part) => {
+        if (totals[createValidPartName(part.trackName)] !== 1) return;
+        const ids = musicIdentifiers(part.trackName, part.staffs.length);
+        if (!isFree(ids)) return;
+        ids.forEach((id) => taken.add(id));
+        keepsName.add(part);
+    });
     const counters = {};
     return (part) => {
+        if (keepsName.has(part)) return part.trackName;
         const base = createValidPartName(part.trackName);
-        if (totals[base] === 1) return part.trackName;
-        let name;
+        let name, ids;
         do {
             counters[base] = (counters[base] || 0) + 1;
             name = `${part.trackName}${counters[base]}`;
-        } while (taken.has(createValidPartName(name)));
-        taken.add(createValidPartName(name));
+            ids = musicIdentifiers(name, part.staffs.length);
+        } while (!isFree(ids));
+        ids.forEach((id) => taken.add(id));
         return name;
     };
 };
