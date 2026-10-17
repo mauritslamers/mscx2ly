@@ -1,1 +1,3 @@
 tests
+scripts
+render/*.test.js

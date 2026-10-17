@@ -1,13 +1,25 @@
 {
   "name": "mscx2ly",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "description": "Tool to render lilypond code from a MuseScore save file",
   "main": "index.js",
   "bin": {
     "mscx2ly": "bin/mscx2ly.js"
   },
+  "files": [
+    "bin",
+    "render/*.js",
+    "!render/*.test.js",
+    "index.js",
+    "lib.js",
+    "xml_wrapper.js",
+    "compat.js",
+    "scripts/extract_lyric_timings.js",
+    "typings"
+  ],
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "ava",
+    "compare-pdf": "node scripts/compare-pdf.js"
   },
   "repository": {
     "type": "git",
@@ -18,7 +30,9 @@
     "musescore"
   ],
   "type": "module",
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "typings": "./typings/mscx2ly.d.ts",
   "author": "Maurits Lamers",
   "license": "MIT",
@@ -27,7 +41,7 @@
   },
   "homepage": "https://github.com/mauritslamers/mscx2ly#readme",
   "dependencies": {
-    "adm-zip": "^0.5.16",
+    "adm-zip": "^0.6.1",
     "commander": "^12.1.0",
     "xml2js": "^0.6.2"
   },

@@ -30,6 +30,7 @@ program
     .option('--parts-papersize <size>', 'Set the paper size for the parts')
     .option('--score-staffsize <size>', 'Set the font size for the score')
     .option('--parts-staffsize <size>', 'Set the font size for the parts')
+    .option('--show-bar-numbers', 'Print bar numbers as LilyPond comments for debugging')
     
     // .option('--no-staccato', 'Do not render staccato articulations')
     // .option('--no-accent', 'Do not render accent articulations')
@@ -74,6 +75,7 @@ program
                 partsPaperSize: options.partsPapersize,
                 scoreStaffSize: options.scoreStaffsize,
                 partsStaffSize: options.partsStaffsize,
+                showBarNumbers: options.showBarNumbers,
                 // omitStaccato: options.noStaccato,
                 // omitAccent: options.noAccent,
                 // omitTenuto: options.noTenuto,

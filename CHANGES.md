@@ -1,3 +1,11 @@
+- 0.1.12
+    - repeat structures: repeat barlines and volta endings
+    - grace notes, staff groupings and staff lines
+    - tuplets and improved polyphonic voicing
+    - tempo and rehearsal marks
+    - fix dotted rests
+    - fix Gregorian/divisio barlines rendering the same as a comma
+    - stability and MuseScore version handling improvements
 - 0.1.11
     - fix script use because of ES6 modules use
     - add some basic lyrics support
