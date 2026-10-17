@@ -556,7 +556,7 @@ test('applyRepeats: builds a self-contained \\alternative block so the caller\'s
     // the two ending slots are consumed into one combined element, not left
     // behind for the caller to join with a bar-check in between
     t.is(out.length, 2);
-    t.is(out[1], 'body2\n  }\n  \\alternative {\n    { end1 }\n    { end2 }\n  }');
+    t.is(out[1], 'body2\n  }\n  \\alternative {\n    { end1\n    }\n    { end2\n    }\n  }');
     const compiled = out.join(' |\n  ');
     t.false(compiled.includes('\\alternative { |'), 'no stray bar-check directly inside \\alternative');
 });
@@ -613,4 +613,119 @@ test('voicing edge case: a voice with only a KeySig (no Chord/Rest) — current 
     const result = await convertSynthetic(keySigOnlyVoiceScore);
     // updated by R05: empty-voicing branch now runs for this case
     t.is(result.music.trim(), 'solo = { \n  \\key c \\major s1 \\bar "|."\n}');
+});
+
+// ---------------------------------------------------------------------------
+// PR #9 review follow-ups
+// ---------------------------------------------------------------------------
+
+const syntheticScore = (staffBody, parts = [['Solo', 1]]) => `<?xml version="1.0" encoding="UTF-8"?>
+<museScore version="4.40">
+  <programVersion>4.4.3</programVersion>
+  <Score>
+    <metaTag name="workTitle">Synthetic</metaTag>
+    <metaTag name="movementTitle">Synthetic Movement</metaTag>
+    ${parts.map(([, id]) => `<Staff id="${id}">${staffBody}</Staff>`).join('\n    ')}
+    ${parts.map(([name]) => `<Part>
+      <Staff><StaffType><name>stdNormal</name></StaffType></Staff>
+      <trackName>${name}</trackName>
+      <Instrument><longName>${name}</longName><shortName>Sl</shortName><instrumentId>test.solo</instrumentId><Channel><synti>Fluid</synti></Channel></Instrument>
+    </Part>`).join('\n    ')}
+  </Score>
+</museScore>`;
+
+const textNode = (text) => ({ get: (name) => (name === 'text' ? text : null) });
+
+test('renderRehearsalMark: quotes and backslashes in the label are escaped', t => {
+    t.is(renderRehearsalMark(textNode('A "bis" \\ B')), '\\mark \\markup { \\box "A \\"bis\\" \\\\ B" }');
+});
+
+test('renderTempo: quotes and backslashes in free text are escaped', t => {
+    t.is(renderTempo({ tempoText: 'Allegro "con brio"' }), '\\tempo "Allegro \\"con brio\\""');
+});
+
+const tempoXml = (textXml) => syntheticScore(`<Measure><voice>
+  <Tempo><tempo>2</tempo><text>${textXml}</text></Tempo>
+  <Rest><durationType>measure</durationType><duration>4/4</duration></Rest>
+</voice></Measure>`);
+
+test('parseTempo: formatted free text (<b>Allegro</b>) is extracted as tempo text', async t => {
+    const result = await convertSynthetic(tempoXml('<b>Allegro</b> con brio'));
+    t.true(result.music.includes('\\tempo "Allegro con brio"'), result.music);
+});
+
+maybeTest('tempotests.mscz', 'tempotests: plain text, metronome and tempo primo marks render', async t => {
+    const result = await convertFile('tests/tempotests.mscz');
+    t.true(result.music.includes('\\tempo "Lento"'));
+    t.true(result.music.includes('\\tempo 4 = 80'));
+    t.true(result.music.includes('\\tempo "tempo primo"'));
+});
+
+test('voicing: a KeySig-only voice 0 does not drop the music in voice 1', async t => {
+    const result = await convertSynthetic(syntheticScore(`<Measure>
+  <voice><KeySig><concertKey>0</concertKey></KeySig></voice>
+  <voice><Rest><durationType>quarter</durationType></Rest></voice>
+</Measure>`));
+    t.true(result.music.includes('\\key c \\major'), result.music);
+    t.true(result.music.includes('r4'), result.music);
+});
+
+test('tuplets: a single-event tuplet both opens and closes on that event', async t => {
+    const result = await convertSynthetic(syntheticScore(`<Measure><voice>
+  <Tuplet actualNotes="3" normalNotes="2"/>
+  <Rest><durationType>quarter</durationType></Rest>
+  <endTuplet/>
+  <Rest><durationType>half</durationType></Rest>
+</voice></Measure>`));
+    t.true(result.music.includes('\\tuplet 3/2 { r4 }'), result.music);
+});
+
+test('tuplets: a Dynamic as the first tuplet event does not leak "undefined" into the output', async t => {
+    const result = await convertSynthetic(syntheticScore(`<Measure><voice>
+  <Tuplet actualNotes="3" normalNotes="2"/>
+  <Dynamic><subtype>p</subtype></Dynamic>
+  <Rest><durationType>eighth</durationType></Rest>
+  <Rest><durationType>eighth</durationType></Rest>
+  <Rest><durationType>eighth</durationType></Rest>
+  <endTuplet/>
+</voice></Measure>`));
+    t.false(result.music.includes('undefined'), result.music);
+});
+
+test('parts: parts sharing a name get running numbers in music, score and parts', async t => {
+    const result = await convertSynthetic(syntheticScore(
+        '<Measure><voice><Rest><durationType>measure</durationType><duration>4/4</duration></Rest></voice></Measure>',
+        [['Flute', 1], ['Flute', 2], ['Oboe', 3]]));
+    t.true(result.music.includes('fluteOne = {'), result.music);
+    t.true(result.music.includes('fluteTwo = {'), result.music);
+    t.true(result.music.includes('oboe = {'), result.music);
+    t.true(result.score.includes('\\fluteOne'), result.score);
+    t.true(result.score.includes('\\fluteTwo'), result.score);
+    t.true(result.parts.includes('\\bookOutputSuffix "Flute1"'), result.parts);
+    t.true(result.parts.includes('\\bookOutputSuffix "Flute2"'), result.parts);
+    t.true(result.parts.includes('\\bookOutputSuffix "Oboe"'), result.parts);
+});
+
+test('applyRepeats: brace closing an ending stays off the line of a bar-number comment', t => {
+    const measures = ['body | % 1', 'end1 | % 2', 'end2 | % 3'];
+    const regions = [{
+        startIndex: 0, bodyEndIndex: 0, count: 2,
+        endings: [{ startIndex: 1, endIndex: 1, number: 1 }, { startIndex: 2, endIndex: 2, number: 2 }],
+    }];
+    const [out] = applyRepeats(measures, regions);
+    out.split('\n').filter(l => l.includes('%')).forEach(l => t.false(l.includes('}'), l));
+});
+
+test('applyRepeats: a repeat whose first ending opens the region keeps the ending measures', t => {
+    const measures = ['end1', 'end2'];
+    const regions = [{
+        startIndex: 0, bodyEndIndex: -1, count: 2,
+        endings: [{ startIndex: 0, endIndex: 0, number: 1 }, { startIndex: 1, endIndex: 1, number: 2 }],
+    }];
+    const out = applyRepeats(measures, regions);
+    t.is(out.length, 1);
+    t.true(out[0].startsWith('\\repeat volta 2 { }'), out[0]);
+    t.true(out[0].includes('{ end1\n    }'), out[0]);
+    t.true(out[0].includes('{ end2\n    }'), out[0]);
+    t.false(out[0].includes('undefined'));
 });

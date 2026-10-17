@@ -7,7 +7,7 @@
  * with the tuplet ratio it belongs to, if any — or null if not inside a tuplet.
  *
  * @param {{ name: string, get: (name: string) => any }[]} voiceEvents
- * @returns {{ evt: object, tupletRatio: { actual: number, normal: number } | null, tupletPosition: 'start' | 'middle' | 'end' | null }[]}
+ * @returns {{ evt: object, tupletRatio: { actual: number, normal: number } | null, tupletPosition: 'start' | 'middle' | 'end' | 'single' | null }[]}
  */
 export function annotateTuplets(voiceEvents) {
     const result = [];
@@ -23,8 +23,10 @@ export function annotateTuplets(voiceEvents) {
             continue;
         }
         if (evt.name === 'endTuplet') {
-            if (current && result.length > 0) {
-                result[result.length - 1].tupletPosition = 'end';
+            if (current && current.memberCount > 0) {
+                const last = result[result.length - 1];
+                // a one-event tuplet opens and closes on the same event
+                last.tupletPosition = last.tupletPosition === 'start' ? 'single' : 'end';
             }
             current = null;
             continue;

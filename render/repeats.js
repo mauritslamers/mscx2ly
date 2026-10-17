@@ -136,7 +136,12 @@ export const applyRepeats = (measures, regions) => {
     const out = [...measures];
     const consumed = new Set();
     for (const region of regions) {
-        out[region.startIndex] = `\\repeat volta ${region.count} {\n    ${out[region.startIndex]}`;
+        // No shared body: the first ending opens the region, so the empty
+        // repeat is anchored on that ending's slot instead of the measure before it.
+        const emptyBody = region.endings && region.bodyEndIndex < region.startIndex;
+        if (!emptyBody) {
+            out[region.startIndex] = `\\repeat volta ${region.count} {\n    ${out[region.startIndex]}`;
+        }
         if (!region.endings) {
             out[region.bodyEndIndex] = `${out[region.bodyEndIndex]}\n  }`;
             continue;
@@ -150,14 +155,20 @@ export const applyRepeats = (measures, regions) => {
         // at region.bodyEndIndex) and the per-measure slots it replaces are
         // dropped from the array entirely rather than left for the caller's
         // join to mangle.
+        // Each closing brace sits on its own line: a measure may end in a `% N`
+        // bar-number comment, which would swallow a brace on the same line.
         const altBlocks = region.endings.map((ending) => {
             const endingMeasures = measures.slice(ending.startIndex, ending.endIndex + 1);
-            return `    { ${endingMeasures.join(' |\n      ')} }`;
+            return `    { ${endingMeasures.join(' |\n      ')}\n    }`;
         });
-        out[region.bodyEndIndex] = `${out[region.bodyEndIndex]}\n  }\n  \\alternative {\n${altBlocks.join('\n')}\n  }`;
+        const alternative = `\\alternative {\n${altBlocks.join('\n')}\n  }`;
+        const anchor = emptyBody ? region.startIndex : region.bodyEndIndex;
+        out[anchor] = emptyBody
+            ? `\\repeat volta ${region.count} { }\n  ${alternative}`
+            : `${out[anchor]}\n  }\n  ${alternative}`;
         for (const ending of region.endings) {
             for (let i = ending.startIndex; i <= ending.endIndex; i++) {
-                consumed.add(i);
+                if (i !== anchor) consumed.add(i);
             }
         }
     }

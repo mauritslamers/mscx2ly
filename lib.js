@@ -774,8 +774,10 @@ export const renderFermata = (fermata) => {
     return fermatas[type] || "";
 }
 
+const escapeLilyString = (text) => String(text ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+
 export const renderRehearsalMark = (mark) => {
-    return `\\mark \\markup { \\box "${mark.get('text')}" }`;
+    return `\\mark \\markup { \\box "${escapeLilyString(mark.get('text'))}" }`;
 }
 
 export const renderHairPin = (spanner) => {
@@ -872,6 +874,15 @@ export const renderDynamic = (dynamic) => {
     return ret;
 }
 
+// Character data of an xml2js node without formatting tags. xml2js merges a node's direct
+// text into `_` (losing its position among child tags) and drops whitespace-only text between
+// tags, so child texts are space-joined and the direct text is appended last.
+const collectPlainText = (node) => {
+    const parts = (node.$$ || []).map(collectPlainText);
+    if (typeof node._ === 'string') parts.push(node._);
+    return parts.join(' ');
+}
+
 export const parseTempo = (tempoEvt) => {
     // this requires a bit of trickery
     /*
@@ -927,6 +938,11 @@ export const parseTempo = (tempoEvt) => {
         if (tempoValue) {
             tempoValue = parseInt(tempoValue, 10);
         }
+        else if (!textNode.get('sym')) {
+            // formatted free text such as <text><b>Allegro</b></text>, no metronome mark
+            const plain = collectPlainText(textNode.data).replace(/\s+/g, ' ').trim();
+            if (plain) tempoText = plain;
+        }
     }
     else if (textNode) {
         tempoText = textNode.text;
@@ -934,7 +950,7 @@ export const parseTempo = (tempoEvt) => {
 
     const tempoSymbol = (!type && textNode && textNode.hasChildren) ? textNode.get('sym') : "";
     const tempoSymbolValue = type? "": metronomeNoteSymbolMap[tempoSymbol];
-    if (!tempoSymbolValue && !type) {
+    if (!tempoSymbolValue && !type && !tempoText) {
         console.warn('Unknown tempo symbol:', tempoSymbol);
     }
     return {
@@ -950,7 +966,7 @@ export const parseTempo = (tempoEvt) => {
 export const renderTempo = (tempoInfo) => {
     // free text (e.g. "A Tempo", from a <Tempo type="aTempo">) with no metronome mark
     if (tempoInfo.tempoText) {
-        return `\\tempo "${tempoInfo.tempoText}"`;
+        return `\\tempo "${escapeLilyString(tempoInfo.tempoText)}"`;
     }
     if (tempoInfo.tempoSymbolValue && tempoInfo.tempoValue) {
         return `\\tempo ${tempoInfo.tempoSymbolValue} = ${tempoInfo.tempoValue}`;
@@ -1159,11 +1175,11 @@ export const renderMusicForStaff = (staff, formatVersion = LATEST_FORMAT_VERSION
                 ctx.currentTupletRatio = tupletRatio;
                 ctx.isGraceNote = !!graceType;
                 const handler = eventHandlers[evt.name];
-                let rendered = handler ? handler(evt, ctx) : '';
-                if (tupletPosition === 'start') {
+                let rendered = (handler ? handler(evt, ctx) : '') ?? '';
+                if (tupletPosition === 'start' || tupletPosition === 'single') {
                     rendered = `\\tuplet ${tupletRatio.actual}/${tupletRatio.normal} { ${rendered}`;
                 }
-                if (tupletPosition === 'end') {
+                if (tupletPosition === 'end' || tupletPosition === 'single') {
                     rendered = `${rendered} }`;
                 }
                 if (graceGroupStart) {
@@ -1220,7 +1236,9 @@ export const renderMusicForStaff = (staff, formatVersion = LATEST_FORMAT_VERSION
             body = `${measureText} << { ${nonEmptyVoices.join(' } \\\\ { ')} } >>`;
         }
         else {
-            body = `${measureText} ${nonEmptyVoices[0]}`;
+            // Structural-only voices (KeySig, Clef, ...) go ahead of the one musical voice instead of being dropped.
+            const structural = parsedVoices.filter((v, idx) => idx !== voicingDecision.voiceIdx && v && v.trim());
+            body = `${measureText} ${[...structural, parsedVoices[voicingDecision.voiceIdx]].join(' ')}`;
         }
         // A `%` line comment runs to the end of the physical line, so the bar
         // number must be the very last thing on it — otherwise it would eat
@@ -1354,8 +1372,7 @@ export const renderStaffOpen = (lineCount) => {
     return `\\new Staff \\with {\n    \\override StaffSymbol.line-count = #${lineCount}\n} {\n`;
 }
 
-const renderPart = (part, formatVersion, showBarNumbers = false, repeatRegions = []) => {
-    const partName = part.trackName;
+const renderPart = (part, formatVersion, showBarNumbers = false, repeatRegions = [], partName = part.trackName) => {
     const longName = part.instrument[0].longName;
     const shortName = part.instrument[0].shortName;
     const transposition = calculateTransposition(part);
@@ -1380,7 +1397,7 @@ const renderPart = (part, formatVersion, showBarNumbers = false, repeatRegions =
             const partDataName = createValidPartName(`${partName}${idx+1}`);
             ret.musicData[`${partDataName}`] = staff.measures;
             const clefname = renderClef(staff.defaultClef);
-            tmpScoreData += renderStaffOpen(staff.lineCount);
+            tmpScoreData += renderStaffOpen(part.staffs[idx].lineCount);
             tmpScoreData += `    ${clefname} \n`;
             if (transposition) tmpScoreData += `    \\transpose ${transposition} { \n`;
             tmpScoreData += `    \\${partDataName}\n`; 
@@ -1453,12 +1470,24 @@ export const renderLilypond = (partsInfo, metaInfo, options = {}, formatVersion 
         scoreData: [], // in the score, the order does matter
         partData: {},
     };
-    const musicKeyCount = {};
-    const partKeyCount = {};
+    // Parts that share a (valid-identifier) name all get a running number appended
+    // (flute -> flute1, flute2); unique names stay as they are. Totals are counted up
+    // front so the first duplicate can be numbered before the second one is seen.
+    const nameTotals = {};
+    partsInfo.flatMap(p => p.isSection ? p.parts : [p]).forEach((p) => {
+        const base = createValidPartName(p.trackName);
+        nameTotals[base] = (nameTotals[base] || 0) + 1;
+    });
+    const nameCounters = {};
+    const uniqueName = (part) => {
+        const base = createValidPartName(part.trackName);
+        nameCounters[base] = (nameCounters[base] || 0) + 1;
+        return nameTotals[base] > 1 ? `${part.trackName}${nameCounters[base]}` : part.trackName;
+    };
     partsInfo.forEach((partInfo) => {
         if (partInfo.isSection) {
             const parts = partInfo.parts.map((part) => {
-                return renderPart(part, formatVersion, options.showBarNumbers, repeatRegions);
+                return renderPart(part, formatVersion, options.showBarNumbers, repeatRegions, uniqueName(part));
             });
             // we can now copy the musicdata to the data.musicData
             let ret = "  \\new StaffGroup <<\n";
@@ -1478,31 +1507,9 @@ export const renderLilypond = (partsInfo, metaInfo, options = {}, formatVersion 
         }
         else {
             // not a section, but a part
-            const part = renderPart(partInfo, formatVersion, options.showBarNumbers, repeatRegions);
-            // we can now copy the musicdata to the data.musicData
-            
-            Object.keys(part.musicData).forEach((key) => {
-                if (!data.musicData[key]) {
-                    data.musicData[key] = part.musicData[key];
-                    musicKeyCount[key] = 1;
-                }
-                else {
-                    musicKeyCount[key] += 1;
-                    const newKey = createValidPartName(`${key}${musicKeyCount[key]}`);
-                    data.musicData[newKey] = part.musicData[key];
-                }
-            });
-            Object.keys(part.partData).forEach((key) => {
-                if (!data.partData[key]) {
-                    data.partData[key] = part.partData[key];
-                    partKeyCount[key] = 1;
-                }
-                else {
-                    partKeyCount[key] += 1;
-                    const newKey = createValidPartName(`${key}${partKeyCount[key]}`);
-                    data.partData[newKey] = part.partData[key];
-                }
-            });
+            const part = renderPart(partInfo, formatVersion, options.showBarNumbers, repeatRegions, uniqueName(partInfo));
+            Object.assign(data.musicData, part.musicData);
+            Object.assign(data.partData, part.partData);
             data.scoreData.push(part.scoreData);
         }   
     });

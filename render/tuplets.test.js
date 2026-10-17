@@ -55,3 +55,13 @@ test('annotateTuplets: a nested Tuplet marker warns and does not throw', t => {
     ];
     t.notThrows(() => annotateTuplets(events));
 });
+test('annotateTuplets: a one-event tuplet is annotated single, not overwritten with end', t => {
+    const result = annotateTuplets([
+        evt('Tuplet', { actualNotes: '3', normalNotes: '2' }),
+        evt('Chord'),
+        evt('endTuplet'),
+        evt('Chord'),
+    ]);
+    t.is(result[0].tupletPosition, 'single');
+    t.is(result[1].tupletPosition, null);
+});
