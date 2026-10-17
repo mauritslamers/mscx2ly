@@ -1462,11 +1462,19 @@ const createPartNamer = (partsInfo) => {
         const base = createValidPartName(p.trackName);
         totals[base] = (totals[base] || 0) + 1;
     });
+    // generated numbers skip identifiers already taken, e.g. by a part really named "Flute1"
+    const taken = new Set(Object.keys(totals).filter((base) => totals[base] === 1));
     const counters = {};
     return (part) => {
         const base = createValidPartName(part.trackName);
-        counters[base] = (counters[base] || 0) + 1;
-        return totals[base] > 1 ? `${part.trackName}${counters[base]}` : part.trackName;
+        if (totals[base] === 1) return part.trackName;
+        let name;
+        do {
+            counters[base] = (counters[base] || 0) + 1;
+            name = `${part.trackName}${counters[base]}`;
+        } while (taken.has(createValidPartName(name)));
+        taken.add(createValidPartName(name));
+        return name;
     };
 };
 

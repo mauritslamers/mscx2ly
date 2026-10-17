@@ -33,7 +33,9 @@ export const findVoltaStart = (filteredVoices) => {
             if (child.name !== 'Spanner' || child.get('type') !== 'Volta') continue;
             const volta = child.get('Volta');
             if (!volta) continue; // a <prev>-only closing marker, not a start
-            const endings = parseInt(volta.get('endings'), 10);
+            // A bracket can cover several passes ("2,3"); the highest one is how many passes the repeat needs.
+            const passes = String(volta.get('endings')).split(',').map((n) => parseInt(n, 10)).filter(Boolean);
+            const endings = Math.max(0, ...passes);
             const next = child.get('next');
             const span = next ? parseInt(next.get('location').get('measures'), 10) || 1 : 1;
             if (endings) return { endings, span };

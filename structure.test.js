@@ -4,7 +4,7 @@ import admZip from 'adm-zip';
 import xml2js from 'xml2js';
 import { XmlWrapper } from './xml_wrapper.js';
 import { convertMSCX2LY, renderLyricTimings, renderBarLine, readOrderInfo, readStaffInfo, readPartsInfo, getEventHandlers, parseRest, renderRehearsalMark, renderTempo, renderStaffOpen } from './lib.js';
-import { analyzeRepeats, mergeRepeatMarkers, applyRepeats } from './render/repeats.js';
+import { findVoltaStart, analyzeRepeats, mergeRepeatMarkers, applyRepeats } from './render/repeats.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -800,4 +800,37 @@ test('renderLyricTimings: grouped parts are keyed by their own track names, not 
     const timings = renderLyricTimings(new XmlWrapper(json.museScore));
     t.false('undefined' in timings, JSON.stringify(Object.keys(timings)));
     t.true('Soprano' in timings || 'Alto' in timings, JSON.stringify(Object.keys(timings)));
+});
+
+const voltaSpanner = (endings, span = 1) => ({
+    name: 'Spanner',
+    get: (key) => ({
+        type: 'Volta',
+        Volta: { get: (k) => (k === 'endings' ? endings : null) },
+        next: { get: () => ({ get: () => String(span) }) },
+    })[key] ?? null,
+});
+
+test('findVoltaStart: a bracket covering several passes ("1,2") counts the highest pass', t => {
+    t.deepEqual(findVoltaStart([[voltaSpanner('1,2')]]), { endings: 2, span: 1 });
+    t.deepEqual(findVoltaStart([[voltaSpanner('3')]]), { endings: 3, span: 1 });
+});
+
+test('analyzeRepeats: "1,2" followed by "3" is a three-pass repeat', t => {
+    const markers = [
+        marker({}),
+        marker({ endRepeat: '2', voltaStart: { endings: 2, span: 1 } }),
+        marker({ voltaStart: { endings: 3, span: 1 } }),
+    ];
+    t.is(analyzeRepeats(markers)[0].count, 3);
+});
+
+test('parts: a generated number never reuses the name of a part that already has it', async t => {
+    const result = await convertSynthetic(syntheticScore(
+        '<Measure><voice><Rest><durationType>measure</durationType><duration>4/4</duration></Rest></voice></Measure>',
+        [['Flute', 1], ['Flute', 2], ['Flute1', 3]]));
+    t.is(result.music.match(/fluteOne = \{/g).length, 1, result.music);
+    t.true(result.music.includes('fluteTwo = {'), result.music);
+    t.true(result.music.includes('fluteThree = {'), result.music);
+    ['Flute1', 'Flute2', 'Flute3'].forEach(n => t.true(result.parts.includes(`\\bookOutputSuffix "${n}"`), n));
 });
